@@ -166,8 +166,60 @@ export const GROUPS = {
   // fetched only as ratio legs, not displayed as a group
   ratioLegs: [
     { s: 'RSP', label: 'S&P Equal Weight', dec: 2 },
+    { s: 'IEF', label: '7-10Y Treasury', dec: 2 },
   ],
 };
+
+// Cross-asset relation pairs for the Market Relations panel (Overview).
+// `up`/`down` are the plain-language reading of a rising/falling ratio.
+// group 'macro' renders as a chart card; 'leadership' feeds the Leadership
+// panel sparklines only.
+export const RELATIONS = [
+  { id: 'spy_tlt', num: 'SPY', den: 'TLT', title: 'Stocks vs Bonds', group: 'macro',
+    up: 'Risk appetite — stocks outrunning Treasuries',
+    down: 'Flight to safety — bonds outrunning stocks' },
+  { id: 'hyg_ief', num: 'HYG', den: 'IEF', title: 'Credit Appetite', group: 'macro',
+    up: 'Junk bonds lead Treasuries — credit calm',
+    down: 'Credit stress — junk sold vs Treasuries' },
+  { id: 'xly_xlp', num: 'XLY', den: 'XLP', title: 'Discretionary vs Staples', group: 'macro',
+    up: 'Discretionary leads staples — cyclical confidence',
+    down: 'Defensive rotation into staples' },
+  { id: 'copper_gold', num: 'HG=F', den: 'GC=F', title: 'Copper vs Gold', group: 'macro',
+    up: 'Growth trade — tends to track yields higher',
+    down: 'Fear trade — growth doubts, tracks yields lower' },
+  { id: 'spy_gold', num: 'SPY', den: 'GC=F', title: 'Stocks vs Gold', group: 'macro',
+    up: 'Paper assets lead hard assets',
+    down: 'Hard assets lead — debasement / stagflation trade' },
+  { id: 'smh_spy', num: 'SMH', den: 'SPY', title: 'Semis Leadership', group: 'macro',
+    up: 'Semis lead the market — tech risk appetite',
+    down: 'Semis lag — leadership narrowing' },
+  { id: 'eem_spy', num: 'EEM', den: 'SPY', title: 'Emerging vs US', group: 'macro',
+    up: 'EM leads — global liquidity, softer dollar',
+    down: 'US exceptionalism — capital hides in the S&P' },
+  { id: 'btc_gold', num: 'BTC-USD', den: 'GC=F', title: 'Bitcoin vs Gold', group: 'macro',
+    up: 'Speculative hard asset leads defensive one',
+    down: 'Gold leads — defensive hard-asset demand' },
+  { id: 'rsp_spy', num: 'RSP', den: 'SPY', title: 'Equal-Weight vs S&P 500', group: 'leadership',
+    up: 'Broad participation', down: 'Narrow, top-heavy tape' },
+  { id: 'qqq_spy', num: 'QQQ', den: 'SPY', title: 'Nasdaq 100 vs S&P 500', group: 'leadership',
+    up: 'Growth/tech leading', down: 'Growth/tech lagging' },
+  { id: 'iwm_spy', num: 'IWM', den: 'SPY', title: 'Small Caps vs S&P 500', group: 'leadership',
+    up: 'Small caps leading', down: 'Small caps lagging' },
+];
+
+// Assets in the 30-day return-correlation matrix (order = display order).
+export const CORRELATION_ASSETS = [
+  { s: 'SPY', label: 'SPX' },
+  { s: 'QQQ', label: 'NDX' },
+  { s: 'IWM', label: 'RUT' },
+  { s: 'TLT', label: 'TLT' },
+  { s: 'HYG', label: 'HY' },
+  { s: 'DX-Y.NYB', label: 'DXY' },
+  { s: 'GC=F', label: 'GOLD' },
+  { s: 'HG=F', label: 'COPPER' },
+  { s: 'CL=F', label: 'OIL' },
+  { s: 'BTC-USD', label: 'BTC' },
+];
 
 const SECTOR_RATIO_EXCLUDES = new Set(['SPY', '^BKX']);
 

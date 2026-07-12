@@ -12,7 +12,7 @@
 // as null/-- until the refs finish loading (~30s after first request).
 
 import YahooFinance from 'yahoo-finance2';
-import { GROUPS, RATIOS, allSymbols, BREADTH_EXCLUDES } from './symbols.js';
+import { GROUPS, RATIOS, RELATIONS, CORRELATION_ASSETS, allSymbols, BREADTH_EXCLUDES } from './symbols.js';
 
 export const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
@@ -52,6 +52,8 @@ export function sameDate(a, b) {
 // (last close of the previous calendar year) and, for sectors, SMA 20/50/200.
 
 const SECTOR_SET = new Set(GROUPS.sectors.map(e => e.s));
+// Volatility symbols keep a full ~1y close series for percentile context.
+const VOL_SET = new Set(GROUPS.volatility.map(e => e.s));
 
 const dailyRefs = {
   bySymbol: new Map(),   // symbol -> { weekRef, sma20, sma50, sma200 }
@@ -103,22 +105,27 @@ async function fetchDailyRef(symbol) {
   }
 
   const ref = { weekRef, ytdRef, sma20: null, sma50: null, sma200: null, series: null, high20: null };
+
+  // Completed sessions only — drop a still-forming today bar
+  const today = localDateParts(new Date(), tz);
+  const last = bars[bars.length - 1];
+  const completed = last && sameDate(localDateParts(last.date, tz), today)
+    ? bars.slice(0, -1) : bars;
+
+  // Last ~70 dated closes for every symbol: RRG ratio series, Market
+  // Relations ratio charts, and the cross-asset correlation matrix.
+  const toPoint = (b) => {
+    const d = localDateParts(b.date, tz);
+    return { d: `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`, c: b.close };
+  };
+  ref.series = completed.slice(-70).map(toPoint);
+  if (VOL_SET.has(symbol)) ref.series1y = completed.slice(-260).map(toPoint);
+
   if (needsSma) {
-    // SMAs over completed sessions only — drop a still-forming today bar
-    const today = localDateParts(new Date(), tz);
-    const last = bars[bars.length - 1];
-    const completed = last && sameDate(localDateParts(last.date, tz), today)
-      ? bars.slice(0, -1) : bars;
     const closes = completed.map(b => b.close);
     ref.sma20 = sma(closes, 20);
     ref.sma50 = sma(closes, 50);
     ref.sma200 = sma(closes, 200);
-    // Last ~70 dated closes for RRG ratio series; 20d high for divergence
-    const p = localDateParts.bind(null);
-    ref.series = completed.slice(-70).map(b => {
-      const d = localDateParts(b.date, tz);
-      return { d: `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`, c: b.close };
-    });
     if (closes.length >= 20) ref.high20 = Math.max(...closes.slice(-20));
   }
   return ref;
@@ -161,6 +168,160 @@ function computeRRG() {
     out.push({ symbol: e.s, label: e.label, rsRatio: cur.x, rsMomentum: cur.y, tail });
   }
   return out.length ? out : null;
+}
+
+// ---------- market relations (cross-asset ratio series) ----------
+// Ratio of two close series on their overlapping session dates, last 60
+// points. Different calendars (crypto trades weekends, futures holidays)
+// are handled by the date intersection.
+function ratioSeries(numSym, denSym) {
+  const num = dailyRefs.bySymbol.get(numSym)?.series;
+  const den = dailyRefs.bySymbol.get(denSym)?.series;
+  if (!num?.length || !den?.length) return null;
+  const denByDate = new Map(den.map(p => [p.d, p.c]));
+  const out = [];
+  for (const p of num) {
+    const d = denByDate.get(p.d);
+    if (d) out.push({ d: p.d, v: p.c / d });
+  }
+  return out.length >= 20 ? out.slice(-60) : null;
+}
+
+function computeRelations(quoteFor) {
+  const out = [];
+  for (const rel of RELATIONS) {
+    const series = ratioSeries(rel.num, rel.den);
+    const num = quoteFor(rel.num);
+    const den = quoteFor(rel.den);
+    const value = num?.price && den?.price ? num.price / den.price : null;
+    const dayPct = num?.dayPct != null && den?.dayPct != null
+      ? (1 + num.dayPct) / (1 + den.dayPct) - 1 : null;
+    // 20-session trend: live ratio vs the close ratio 20 sessions back
+    const back20 = series && series.length >= 20 ? series[series.length - 20].v : null;
+    const pct20d = value != null && back20 ? value / back20 - 1 : null;
+    out.push({
+      id: rel.id, title: rel.title, group: rel.group,
+      num: rel.num, den: rel.den, label: `${rel.num}/${rel.den}`,
+      up: rel.up, down: rel.down,
+      value, dayPct, pct20d, series,
+    });
+  }
+  return out.some(r => r.series) ? out : null;
+}
+
+// ---------- cross-asset correlation matrix (30d daily log returns) ----------
+function pearson(xs, ys) {
+  const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let k = 0; k < xs.length; k++) {
+    sxy += (xs[k] - mx) * (ys[k] - my);
+    sxx += (xs[k] - mx) ** 2;
+    syy += (ys[k] - my) ** 2;
+  }
+  const denom = Math.sqrt(sxx * syy);
+  return denom > 0 ? sxy / denom : null;
+}
+
+function logReturns(series) {
+  const rets = new Map();
+  for (let i = 1; i < series.length; i++) {
+    if (series[i].c > 0 && series[i - 1].c > 0) {
+      rets.set(series[i].d, Math.log(series[i].c / series[i - 1].c));
+    }
+  }
+  return rets;
+}
+
+// Rolling 30-session correlation series for the stock-bond regime chart: at
+// each date, the correlation of the trailing 30 aligned daily returns.
+function rollingCorrelation(symA, symB, window = 30) {
+  const sa = dailyRefs.bySymbol.get(symA)?.series;
+  const sb = dailyRefs.bySymbol.get(symB)?.series;
+  if (!sa?.length || !sb?.length) return null;
+  const ra = logReturns(sa);
+  const rb = logReturns(sb);
+  const dates = [...ra.keys()].filter(d => rb.has(d)).sort();
+  if (dates.length < window + 5) return null;
+  const out = [];
+  for (let i = window - 1; i < dates.length; i++) {
+    const win = dates.slice(i - window + 1, i + 1);
+    const corr = pearson(win.map(d => ra.get(d)), win.map(d => rb.get(d)));
+    if (corr != null) out.push({ d: dates[i], v: corr });
+  }
+  return out.length ? out : null;
+}
+
+function computeCorrelations() {
+  const returnsBySymbol = new Map();
+  for (const a of CORRELATION_ASSETS) {
+    const series = dailyRefs.bySymbol.get(a.s)?.series;
+    if (!series || series.length < 21) continue;
+    returnsBySymbol.set(a.s, logReturns(series));
+  }
+  if (returnsBySymbol.size < 2) return null;
+
+  const assets = CORRELATION_ASSETS.filter(a => returnsBySymbol.has(a.s));
+  const matrix = assets.map(() => assets.map(() => null));
+  for (let i = 0; i < assets.length; i++) {
+    matrix[i][i] = 1;
+    for (let j = i + 1; j < assets.length; j++) {
+      const ra = returnsBySymbol.get(assets[i].s);
+      const rb = returnsBySymbol.get(assets[j].s);
+      const dates = [...ra.keys()].filter(d => rb.has(d)).sort().slice(-30);
+      if (dates.length < 20) continue;
+      const corr = pearson(dates.map(d => ra.get(d)), dates.map(d => rb.get(d)));
+      matrix[i][j] = corr;
+      matrix[j][i] = corr;
+    }
+  }
+  const spxTltSeries = rollingCorrelation('SPY', 'TLT', 30);
+  return {
+    assets: assets.map(a => ({ symbol: a.s, label: a.label })),
+    matrix,
+    window: 30,
+    spxTlt: spxTltSeries
+      ? { series: spxTltSeries, value: spxTltSeries[spxTltSeries.length - 1].v }
+      : null,
+  };
+}
+
+// ---------- volatility percentile context (1y) ----------
+function percentile(values, v) {
+  if (v == null || !values?.length) return null;
+  let below = 0;
+  for (const x of values) if (x <= v) below++;
+  return Math.round((below / values.length) * 100);
+}
+
+// 1y percentile of the LIVE value vs trailing daily closes. For the VIX/VIX3M
+// term ratio the historical ratio series is built on aligned dates.
+function computeVolPctiles(quoteFor) {
+  const closes = (s) => dailyRefs.bySymbol.get(s)?.series1y?.map(p => p.c) ?? null;
+  const vix = quoteFor('^VIX');
+  const vix3m = quoteFor('^VIX3M');
+  const move = quoteFor('^MOVE');
+
+  let termPctile = null;
+  const vixSeries = dailyRefs.bySymbol.get('^VIX')?.series1y;
+  const vix3mSeries = dailyRefs.bySymbol.get('^VIX3M')?.series1y;
+  if (vixSeries && vix3mSeries && vix?.price && vix3m?.price) {
+    const byDate = new Map(vix3mSeries.map(p => [p.d, p.c]));
+    const ratios = [];
+    for (const p of vixSeries) {
+      const b = byDate.get(p.d);
+      if (b) ratios.push(p.c / b);
+    }
+    termPctile = percentile(ratios, vix.price / vix3m.price);
+  }
+
+  const out = {
+    vix: percentile(closes('^VIX'), vix?.price),
+    vix3m: percentile(closes('^VIX3M'), vix3m?.price),
+    move: percentile(closes('^MOVE'), move?.price),
+    termRatio: termPctile,
+  };
+  return Object.values(out).some(v => v != null) ? out : null;
 }
 
 async function refreshDailyRefs() {
@@ -299,7 +460,15 @@ async function fetchAllQuotes() {
 
   const spyHigh20 = dailyRefs.bySymbol.get('SPY')?.high20 ?? null;
 
-  return { asOf: new Date().toISOString(), groups, ratios, breadth, rrg: computeRRG(), spyHigh20, errors };
+  return {
+    asOf: new Date().toISOString(),
+    groups, ratios, breadth,
+    rrg: computeRRG(),
+    relations: computeRelations(quoteFor),
+    correlations: computeCorrelations(),
+    volPctiles: computeVolPctiles(quoteFor),
+    spyHigh20, errors,
+  };
 }
 
 // ---------- cache with stampede guard + stale-on-error ----------

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { colors, fonts } from '../styles/theme';
+import { expectationDir, surpriseVsForecast } from '../lib/econ';
 
 function useNow(tickMs = 30000) {
   const [now, setNow] = useState(() => Date.now());
@@ -85,6 +86,19 @@ export default function EventStrip({ events }) {
                 <span style={{ color: colors.text.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.title}</span>
                 {e.forecast && <span style={{ color: colors.text.muted, fontSize: 11 }}>f: {e.forecast}</span>}
                 {e.previous && <span style={{ color: colors.text.muted, fontSize: 11 }}>p: {e.previous}</span>}
+                {e.actual ? (() => {
+                  const dev = surpriseVsForecast(e.actual, e.forecast);
+                  const color = dev == null || dev === 0 ? colors.text.primary
+                    : dev > 0 ? colors.regime.ELEVATED : colors.text.accent;
+                  return <span style={{ color, fontSize: 11, fontWeight: 700 }}>a: {e.actual}</span>;
+                })() : !past && (() => {
+                  const dir = expectationDir(e.forecast, e.previous);
+                  return dir ? (
+                    <span style={{ color: colors.text.muted, fontSize: 11 }}>
+                      cons. {dir > 0 ? '▲' : '▼'}
+                    </span>
+                  ) : null;
+                })()}
               </div>
             );
           })}

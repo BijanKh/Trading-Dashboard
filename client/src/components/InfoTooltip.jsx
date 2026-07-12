@@ -114,6 +114,22 @@ const INDICATOR_INFO = {
     source: 'CFTC weekly COT report (legacy, futures only)',
     weight: 'N/A',
   },
+  relations: {
+    name: 'Market Relations',
+    short: 'Cross-Asset Ratio Charts',
+    description: 'Each card divides one asset by another and plots the ratio over the last ~60 sessions. A rising line means the first asset is outperforming the second — regardless of whether both are rising or falling. These ratios are how macro traders read risk appetite: stocks vs bonds, junk credit vs Treasuries, copper vs gold, discretionary vs staples.',
+    interpretation: 'Read the direction, not the level: a rising Stocks/Bonds line = risk-on; falling Copper/Gold = growth fears (it usually tracks 10-year yields); falling Stocks/Gold = the hard-asset / stagflation trade working. The 20d figure is the trend over roughly one trading month. Click any card to open the full ratio chart in TradingView.',
+    source: 'Computed from Yahoo daily closes (refreshed every 6h) + live quotes',
+    weight: 'N/A',
+  },
+  correlations: {
+    name: 'Cross-Asset Correlations',
+    short: 'Which Markets Move Together',
+    description: 'Pearson correlation of daily returns over the last 30 sessions for the ten major assets. +1 (deep blue) = the two move together, −1 (deep red) = they move opposite, near 0 (dark) = unrelated.',
+    interpretation: 'The most important cell is SPX·TLT: negative means Treasuries still hedge equities (normal regime); positive with both falling is the 2022-style inflation regime where nothing hedges. BTC·NDX positive = crypto trading as levered tech. GOLD·DXY is usually negative — when it flips positive, something unusual is driving gold. Correlations regime-shift slowly; watch cells that change color week to week.',
+    source: 'Computed from Yahoo daily closes, 30-day window',
+    weight: 'N/A',
+  },
   yields: {
     name: 'Treasury Yields',
     short: 'US Government Bond Rates',

@@ -11,6 +11,9 @@ import SpxBreadthPanel from '../components/SpxBreadthPanel';
 import TapeScore from '../components/TapeScore';
 import BriefingPanel from '../components/BriefingPanel';
 import OptionsLevels from '../components/OptionsLevels';
+import RelationsPanel from '../components/RelationsPanel';
+import CorrelationMatrix from '../components/CorrelationMatrix';
+import NewsPanel from '../components/NewsPanel';
 import { daysUntil } from '../components/EarningsPanel';
 import { fetchOptions } from '../lib/api';
 import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
@@ -94,16 +97,21 @@ export default function OverviewTab() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
-        <VolPanel volatility={g.volatility} fearGreed={quotes.fearGreed} history={quotes.history} />
-        <LeadershipPanel ratios={leadershipRatios} />
+        <VolPanel volatility={g.volatility} fearGreed={quotes.fearGreed} history={quotes.history} pctiles={quotes.volPctiles} />
+        <LeadershipPanel ratios={leadershipRatios} relations={quotes.relations} />
         <SpxBreadthPanel spx={quotes.spxBreadth} history={quotes.history} />
         <BreadthPanel breadth={quotes.breadth} />
         <OptionsLevels walls={optionsData?.walls} />
       </div>
 
-      <div>
-        <SectionLabel>SECTORS — TODAY</SectionLabel>
-        <SectorHeatmap quotes={g.sectors || []} mode="day" compact />
+      <RelationsPanel relations={quotes.relations} />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 12, alignItems: 'start' }}>
+        <CorrelationMatrix correlations={quotes.correlations} />
+        <div>
+          <SectionLabel>SECTORS — TODAY</SectionLabel>
+          <SectorHeatmap quotes={g.sectors || []} mode="day" compact />
+        </div>
       </div>
 
       <div>
@@ -125,6 +133,8 @@ export default function OverviewTab() {
           <TileRow quotes={g.crypto || []} min={120} showWtd />
         </div>
       </div>
+
+      <NewsPanel />
 
       <EventStrip events={calendar?.events} />
     </div>

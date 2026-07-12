@@ -74,7 +74,7 @@ export default function FXBondsTab() {
 
       {/* Yield curve chart + regime read (FRED prev-close basis) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16, alignItems: 'stretch' }}>
-        <YieldCurve yields={fred?.yields} />
+        <YieldCurve yields={fred?.yields} history={fred?.yieldHistory} />
         <CurveRegime fredYields={fred?.yields} q2={yieldBySym['2YY=F']} q10={yieldBySym['^TNX']} />
       </div>
 

@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { fetchAllSeries, SERIES } from './fred.js';
 import { computeIndicators } from './indicators.js';
-import { saveObservations, saveSnapshot, getHistory, getHYHistory, getLatestSnapshot } from './db.js';
+import { saveObservations, saveSnapshot, getHistory, getHYHistory, getLatestSnapshot, getObservations } from './db.js';
 import { startScheduler } from './scheduler.js';
 import { getQuotes } from './yahoo.js';
 import { getCalendar } from './calendar.js';
@@ -24,6 +24,8 @@ import { importIvCsv } from './ivimport.js';
 import { getCot } from './cot.js';
 import { getEcbCurve } from './ecb.js';
 import { getTrending, startTrendingScheduler } from './trending.js';
+import { getNews } from './news.js';
+import { evaluateAlerts } from './alerts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production';
@@ -92,6 +94,45 @@ function parseDays(raw) {
 
 let cachedResult = null;
 
+// ---------- ghost yield curves (1m / 1y ago from stored FRED observations) ----------
+const CURVE_SERIES = { '2y': 'DGS2', '5y': 'DGS5', '10y': 'DGS10', '20y': 'DGS20', '30y': 'DGS30' };
+const curveCache = { data: null, fetchedAt: 0 };
+
+function yieldsAsOf(obsBySeries, targetDate) {
+  const out = { date: null };
+  for (const [key, seriesId] of Object.entries(CURVE_SERIES)) {
+    // observations are date-DESC; take the newest one at or before the target
+    const obs = obsBySeries[seriesId].find(o => o.date <= targetDate);
+    if (obs) {
+      out[key] = obs.value;
+      if (!out.date || obs.date > out.date) out.date = obs.date;
+    }
+  }
+  return out.date ? out : null;
+}
+
+function getYieldHistory() {
+  const now = Date.now();
+  if (curveCache.data && now - curveCache.fetchedAt < 6 * 60 * 60 * 1000) return curveCache.data;
+  try {
+    const obsBySeries = {};
+    for (const seriesId of Object.values(CURVE_SERIES)) {
+      obsBySeries[seriesId] = getObservations(seriesId, 600);
+    }
+    const iso = (msAgo) => new Date(now - msAgo).toISOString().slice(0, 10);
+    const data = {
+      m1: yieldsAsOf(obsBySeries, iso(30 * 86400000)),
+      y1: yieldsAsOf(obsBySeries, iso(365 * 86400000)),
+    };
+    curveCache.data = data;
+    curveCache.fetchedAt = now;
+    return data;
+  } catch (err) {
+    console.error('Yield history failed:', err.message);
+    return null;
+  }
+}
+
 export async function fetchAndStore() {
   console.log('Fetching all FRED series...');
   const allData = await fetchAllSeries(120);
@@ -147,12 +188,13 @@ app.get('/api/current', async (req, res) => {
             '20y': dbSnapshot.dgs20, '30y': dbSnapshot.dgs30,
           },
           context: { fedFunds: dbSnapshot.fed_funds, sofr: dbSnapshot.sofr },
+          yieldHistory: getYieldHistory(),
         });
         return;
       }
       cachedResult = await fetchAndStore();
     }
-    res.json(cachedResult);
+    res.json({ ...cachedResult, yieldHistory: getYieldHistory() });
   } catch (err) {
     console.error('Error in /api/current:', err);
     res.status(500).json({ error: 'Failed to load current data.' });
@@ -179,8 +221,9 @@ app.get('/api/hy-history', (req, res) => {
 
 app.get('/api/quotes', async (req, res) => {
   try {
-    const [quotes, fearGreed, spxBreadth] = await Promise.all([
+    const [quotes, fearGreed, spxBreadth, calendar] = await Promise.all([
       getQuotes(), getFearGreed(), getSpxBreadth(),
+      getCalendar().catch(() => null),
     ]);
     recordMetrics(quotes, spxBreadth);
     const creditSnapshot = cachedResult
@@ -190,17 +233,33 @@ app.get('/api/quotes', async (req, res) => {
       quotes, spxBreadth, fearGreed,
       creditComposite: creditSnapshot?.composite ?? null,
     });
+    const divergence = computeDivergence(quotes, spxBreadth);
+    const alerts = evaluateAlerts({
+      quotes, tape, divergence, calendar,
+      credit: creditSnapshot,
+      creditIndicators: cachedResult?.indicators ?? null,
+    });
     res.json({
       ...quotes,
       fearGreed,
       spxBreadth,
       tape,
+      alerts,
       history: getHistoryBundle(30),
-      divergence: computeDivergence(quotes, spxBreadth),
+      divergence,
     });
   } catch (err) {
     console.error('Error in /api/quotes:', err);
     res.status(502).json({ error: 'Failed to load quotes.' });
+  }
+});
+
+app.get('/api/news', async (req, res) => {
+  try {
+    res.json(await getNews());
+  } catch (err) {
+    console.error('Error in /api/news:', err);
+    res.status(502).json({ error: 'Failed to load news.' });
   }
 });
 

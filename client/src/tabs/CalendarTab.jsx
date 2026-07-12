@@ -2,6 +2,33 @@ import React, { useState, useMemo } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { useCalendar, useEarnings } from '../context/QuotesContext';
 import EarningsPanel from '../components/EarningsPanel';
+import { expectationDir, surpriseVsForecast } from '../lib/econ';
+
+// Consensus-vs-previous read: which way the market expects the print to move.
+export function ExpectationCell({ event }) {
+  if (event.actual) {
+    const dev = surpriseVsForecast(event.actual, event.forecast);
+    const hot = dev != null && dev > 0;
+    const cold = dev != null && dev < 0;
+    return (
+      <span>
+        <span style={{ color: colors.text.primary, fontWeight: 700 }}>A: {event.actual}</span>
+        {dev != null && dev !== 0 && (
+          <span style={{ color: hot ? colors.regime.ELEVATED : colors.text.accent, marginLeft: 6 }}>
+            {hot ? '▲' : '▼'} {dev > 0 ? '+' : ''}{Number(dev.toFixed(2))} vs f
+          </span>
+        )}
+      </span>
+    );
+  }
+  const dir = expectationDir(event.forecast, event.previous);
+  if (dir == null || dir === 0) return null;
+  return (
+    <span style={{ color: colors.text.secondary }}>
+      cons. {dir > 0 ? '▲ higher' : '▼ lower'}
+    </span>
+  );
+}
 
 const IMPACTS = ['High', 'Medium', 'Low', 'Holiday'];
 const MAIN_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CHF', 'CAD', 'AUD', 'NZD'];
@@ -108,20 +135,28 @@ export default function CalendarTab() {
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: fonts.mono }}>
               <tbody>
-                {events.map((e, i) => (
-                  <tr key={`${e.date}-${e.title}-${i}`}>
-                    <td style={{ color: colors.text.muted, padding: '4px 8px 4px 0', whiteSpace: 'nowrap', width: 60 }}>
-                      {new Date(e.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </td>
-                    <td style={{ color: colors.impact[e.impact] || colors.text.muted, padding: '4px 8px', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap', width: 60 }}>
-                      ● {e.impact.toUpperCase()}
-                    </td>
-                    <td style={{ color: colors.text.secondary, padding: '4px 8px', width: 44 }}>{e.country}</td>
-                    <td style={{ color: colors.text.primary, padding: '4px 8px' }}>{e.title}</td>
-                    <td style={{ color: colors.text.muted, padding: '4px 8px', whiteSpace: 'nowrap' }}>{e.forecast ? `f: ${e.forecast}` : ''}</td>
-                    <td style={{ color: colors.text.muted, padding: '4px 8px', whiteSpace: 'nowrap' }}>{e.previous ? `p: ${e.previous}` : ''}</td>
-                  </tr>
-                ))}
+                {events.map((e, i) => {
+                  const released = new Date(e.date).getTime() < Date.now();
+                  return (
+                    <tr key={`${e.date}-${e.title}-${i}`} style={{ opacity: released && !e.actual ? 0.5 : 1 }}>
+                      <td style={{ color: colors.text.muted, padding: '4px 8px 4px 0', whiteSpace: 'nowrap', width: 60 }}>
+                        {new Date(e.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td style={{ color: colors.impact[e.impact] || colors.text.muted, padding: '4px 8px', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap', width: 60 }}>
+                        ● {e.impact.toUpperCase()}
+                      </td>
+                      <td style={{ color: colors.text.secondary, padding: '4px 8px', width: 44 }}>{e.country}</td>
+                      <td style={{ color: colors.text.primary, padding: '4px 8px' }}>{e.title}</td>
+                      <td style={{ color: colors.text.muted, padding: '4px 8px', whiteSpace: 'nowrap' }}>{e.forecast ? `f: ${e.forecast}` : ''}</td>
+                      <td style={{ color: colors.text.muted, padding: '4px 8px', whiteSpace: 'nowrap' }}>{e.previous ? `p: ${e.previous}` : ''}</td>
+                      <td style={{ padding: '4px 8px', whiteSpace: 'nowrap', fontSize: 11 }}>
+                        {released && !e.actual
+                          ? <span style={{ color: colors.text.muted }}>released</span>
+                          : <ExpectationCell event={e} />}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -130,6 +165,8 @@ export default function CalendarTab() {
 
       <div style={{ fontSize: 11, color: colors.text.muted, fontFamily: fonts.mono }}>
         Source: ForexFactory weekly feed. Times shown in your local timezone.
+        {' '}&quot;cons. ▲/▼&quot; = consensus expects the print above/below the previous one.
+        When the feed carries actuals: amber ▲ = hotter than forecast, blue ▼ = cooler.
       </div>
     </div>
   );

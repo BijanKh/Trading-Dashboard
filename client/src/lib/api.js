@@ -90,6 +90,12 @@ export async function fetchEarnings() {
   return res.json();
 }
 
+export async function fetchNews() {
+  const res = await fetch(`${BASE}/api/news`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function fetchTrending(refresh = false) {
   const res = await fetch(`${BASE}/api/trending${refresh ? '?refresh=1' : ''}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

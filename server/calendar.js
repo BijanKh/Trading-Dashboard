@@ -24,6 +24,9 @@ async function fetchFeed() {
       impact: String(e.impact || 'Low'),  // High / Medium / Low / Holiday
       forecast: e.forecast != null ? String(e.forecast) : '',
       previous: e.previous != null ? String(e.previous) : '',
+      // The weekly feed currently ships without actuals; pass one through if
+      // it ever appears so the UI can show true surprises.
+      actual: e.actual != null ? String(e.actual) : '',
     }));
 }
 

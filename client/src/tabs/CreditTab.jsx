@@ -167,7 +167,7 @@ export default function CreditTab() {
         marginBottom: 16,
       }}>
         <HYChart history={hyHistory} />
-        <YieldCurve yields={data?.yields} />
+        <YieldCurve yields={data?.yields} history={data?.yieldHistory} />
       </div>
 
       {/* Composite score history */}

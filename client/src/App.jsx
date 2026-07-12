@@ -3,6 +3,7 @@ import { colors, fonts } from './styles/theme';
 import { MarketDataProvider, useQuotes } from './context/QuotesContext';
 import { ChartModalProvider } from './context/ChartModalContext';
 import TabBar from './components/TabBar';
+import AlertStrip from './components/AlertStrip';
 import OverviewTab from './tabs/OverviewTab';
 import SectorsTab from './tabs/SectorsTab';
 import TrendingTab from './tabs/TrendingTab';
@@ -45,15 +46,22 @@ function Header({ active }) {
   );
 }
 
+// Deep-linkable tabs: #credit opens the Credit tab directly.
+function initialTab() {
+  const hash = window.location.hash.replace('#', '');
+  return TABS.some(t => t.id === hash) ? hash : 'overview';
+}
+
 export default function App() {
-  const [active, setActive] = useState('overview');
+  const [active, setActive] = useState(initialTab);
   // Panels mount lazily on first visit, then stay alive (display:none) so the
   // Credit tab keeps its load-once behavior and intraday tabs keep state.
-  const [visited, setVisited] = useState(() => new Set(['overview']));
+  const [visited, setVisited] = useState(() => new Set([initialTab()]));
 
   function switchTab(id) {
     setVisited(prev => prev.has(id) ? prev : new Set(prev).add(id));
     setActive(id);
+    window.history.replaceState(null, '', `#${id}`);
   }
 
   // Keyboard shortcuts: 1-9 switch tabs (ignored while typing in a field)
@@ -76,6 +84,7 @@ export default function App() {
       <ChartModalProvider>
         <div style={{ maxWidth: 1320, margin: '0 auto', padding: '20px 24px 40px' }}>
           <Header active={active} />
+          <AlertStrip />
           <TabBar tabs={TABS} active={active} onChange={switchTab} />
           {TABS.map(({ id, component: Component }) => (
             visited.has(id) && (
