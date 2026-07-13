@@ -16,6 +16,13 @@
         -webkit-font-smoothing: antialiased;
       }
       #root { min-height: 100vh; }
+      /* Always-visible thin scrollbars: macOS hides overlay scrollbars until
+         scroll, which made horizontally-overflowing tables look cut off. */
+      ::-webkit-scrollbar { height: 8px; width: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #22304d; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #2e4066; }
+      * { scrollbar-width: thin; scrollbar-color: #22304d transparent; }
     </style>
   </head>
   <body>

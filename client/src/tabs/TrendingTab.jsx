@@ -107,7 +107,7 @@ function Section({ title, subtitle, lists }) {
           {subtitle}
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(560px, 1fr))', gap: 16, alignItems: 'start' }}>
         <SetupTable title="LONG — 10 STRONGEST" side="long" rows={lists?.long} />
         <SetupTable title="SHORT — 10 WEAKEST" side="short" rows={lists?.short} />
       </div>

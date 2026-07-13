@@ -45,7 +45,7 @@ export default function CommoditiesTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 16, alignItems: 'start' }}>
         {SECTIONS.map(s => (
           <QuoteTable key={s.key} title={s.title} columns={COLUMNS} rows={rowsFor(s.key)} />
         ))}
