@@ -14,7 +14,7 @@ function groupVal(quotes, group, symbol) {
   return quotes?.groups?.[group]?.find(q => q.symbol === symbol)?.price ?? null;
 }
 
-export function recordMetrics(quotes, spxBreadth) {
+export function recordMetrics(quotes, spxBreadth, mcclellan) {
   const now = Date.now();
   if (now - lastWrite < WRITE_INTERVAL_MS) return;
   lastWrite = now;
@@ -34,6 +34,7 @@ export function recordMetrics(quotes, spxBreadth) {
     spx_above20: spxBreadth?.pctAbove20,
     spx_above50: spxBreadth?.pctAbove50,
     spx_above200: spxBreadth?.pctAbove200,
+    mcclellan_osc: mcclellan?.osc,
   });
 }
 

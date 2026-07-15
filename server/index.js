@@ -13,7 +13,7 @@ import { getQuotes } from './yahoo.js';
 import { getCalendar } from './calendar.js';
 import { getEarnings } from './earnings.js';
 import { getFearGreed } from './sentiment.js';
-import { getSpxBreadth } from './sp500.js';
+import { getSpxBreadth, getMcclellan } from './sp500.js';
 import { getCrypto } from './crypto.js';
 import { recordMetrics, getHistoryBundle, computeDivergence } from './metrics.js';
 import { computeTapeScore } from './tape.js';
@@ -225,7 +225,8 @@ app.get('/api/quotes', async (req, res) => {
       getQuotes(), getFearGreed(), getSpxBreadth(),
       getCalendar().catch(() => null),
     ]);
-    recordMetrics(quotes, spxBreadth);
+    const mcclellan = getMcclellan();
+    recordMetrics(quotes, spxBreadth, mcclellan);
     const creditSnapshot = cachedResult
       ? { composite: cachedResult.composite }
       : (() => { const s = getLatestSnapshot(); return s ? { composite: s.composite_score } : null; })();
@@ -235,7 +236,7 @@ app.get('/api/quotes', async (req, res) => {
     });
     const divergence = computeDivergence(quotes, spxBreadth);
     const alerts = evaluateAlerts({
-      quotes, tape, divergence, calendar,
+      quotes, tape, divergence, calendar, mcclellan,
       credit: creditSnapshot,
       creditIndicators: cachedResult?.indicators ?? null,
     });
@@ -243,6 +244,7 @@ app.get('/api/quotes', async (req, res) => {
       ...quotes,
       fearGreed,
       spxBreadth,
+      mcclellan,
       tape,
       alerts,
       history: getHistoryBundle(30),
@@ -284,6 +286,7 @@ app.get('/api/briefing', async (req, res) => {
     res.json(composeBriefing({
       quotes, spxBreadth, fearGreed, calendar, earnings, crypto, tape,
       divergence: computeDivergence(quotes, spxBreadth), credit,
+      mcclellan: getMcclellan(),
     }));
   } catch (err) {
     console.error('Error in /api/briefing:', err);

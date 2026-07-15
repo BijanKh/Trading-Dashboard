@@ -98,6 +98,14 @@ const INDICATOR_INFO = {
     source: 'Computed from Yahoo quotes (50/200d) + daily bars (20d); constituents from Wikipedia',
     weight: 'N/A',
   },
+  mcclellan: {
+    name: 'McClellan Oscillator (S&P 500)',
+    short: 'Momentum of Market Breadth',
+    description: 'The 19-day EMA minus the 39-day EMA of ratio-adjusted net advances across all ~500 S&P members: 1000 × (advancers − decliners) / (advancers + decliners) per session. Where the breadth rows above show the LEVEL of participation, this measures its MOMENTUM — how fast participation is improving or deteriorating. The Summation Index is the running total of the oscillator and tracks the intermediate-term breadth regime (computed over the last ~110 sessions, so its direction matters, not its absolute level).',
+    interpretation: 'Zero-line crosses mark breadth-momentum turns. Above +150 = overbought thrust (strong but stretched); below −150 = oversold washout, where bounces often start. The classic warning is divergence: index at new highs while the oscillator makes lower highs. Summation Index rising = intermediate-term breadth uptrend intact.',
+    source: 'Computed from the daily S&P member bars (same pass as the 20d SMA breadth)',
+    weight: 'N/A',
+  },
   tape: {
     name: 'Tape Score',
     short: 'One Number For Risk-On vs Risk-Off',

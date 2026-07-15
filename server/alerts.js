@@ -7,7 +7,7 @@ function groupVal(quotes, group, symbol) {
   return quotes?.groups?.[group]?.find(q => q.symbol === symbol)?.price ?? null;
 }
 
-export function evaluateAlerts({ quotes, tape, credit, creditIndicators, divergence, calendar }) {
+export function evaluateAlerts({ quotes, tape, credit, creditIndicators, divergence, calendar, mcclellan }) {
   const alerts = [];
   const add = (id, severity, title, detail) => alerts.push({ id, severity, title, detail });
 
@@ -52,6 +52,26 @@ export function evaluateAlerts({ quotes, tape, credit, creditIndicators, diverge
   if (spxTlt != null && spxTlt > 0.2) {
     add('stock_bond_corr', 'stress', `SPX·TLT correlation +${spxTlt.toFixed(2)}`,
       'Stocks and Treasuries moving together — bonds are not hedging equities in this tape.');
+  }
+
+  // McClellan Oscillator (S&P 500, ratio-adjusted). Zero-cross ids include the
+  // session date so each cross notifies once and re-arms on the next one.
+  if (mcclellan?.osc != null && mcclellan.prevOsc != null) {
+    const { osc, prevOsc, asOf } = mcclellan;
+    if (prevOsc >= 0 && osc < 0) {
+      add(`mcclellan_cross_down_${asOf}`, 'stress', `McClellan Oscillator crossed below 0 (${osc.toFixed(0)})`,
+        'Breadth momentum turned negative — more S&P members declining than advancing on a smoothed basis.');
+    } else if (prevOsc <= 0 && osc > 0) {
+      add(`mcclellan_cross_up_${asOf}`, 'info', `McClellan Oscillator crossed above 0 (+${osc.toFixed(0)})`,
+        'Breadth momentum turned positive.');
+    }
+    if (osc < -150) {
+      add('mcclellan_oversold', 'stress', `McClellan Oscillator ${osc.toFixed(0)}`,
+        'Deeply oversold breadth (<-150) — capitulation zone; bounces often start here.');
+    } else if (osc > 150) {
+      add('mcclellan_overbought', 'info', `McClellan Oscillator +${osc.toFixed(0)}`,
+        'Overbought breadth (>+150) — strong but stretched participation.');
+    }
   }
 
   if (divergence?.active) {

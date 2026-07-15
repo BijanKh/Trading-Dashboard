@@ -11,7 +11,7 @@ function find(quotes, group, symbol) {
   return quotes?.groups?.[group]?.find(q => q.symbol === symbol);
 }
 
-export function composeBriefing({ quotes, spxBreadth, fearGreed, calendar, earnings, crypto, tape, divergence, credit }) {
+export function composeBriefing({ quotes, spxBreadth, fearGreed, calendar, earnings, crypto, tape, divergence, credit, mcclellan }) {
   const lines = [];
   if (!quotes) return { generatedAt: new Date().toISOString(), lines };
 
@@ -40,6 +40,10 @@ export function composeBriefing({ quotes, spxBreadth, fearGreed, calendar, earni
   if (vix?.price != null) parts.push(`VIX ${vix.price.toFixed(1)} (${pct(vix.dayPct)})`);
   if (term != null) parts.push(`term ${term.toFixed(2)} ${term > 1 ? 'BACKWARDATION' : 'contango'}`);
   if (spxBreadth?.pctAbove50 != null) parts.push(`${Math.round(spxBreadth.pctAbove50 * 100)}% of S&P above 50d`);
+  if (mcclellan?.osc != null) {
+    const dir = mcclellan.summation > mcclellan.prevSummation ? 'rising' : 'falling';
+    parts.push(`McClellan ${mcclellan.osc > 0 ? '+' : ''}${Math.round(mcclellan.osc)} (summation ${dir})`);
+  }
   if (typeof fearGreed?.score === 'number') parts.push(`F&G ${fearGreed.score} (${fearGreed.rating})`);
   if (parts.length) lines.push({ tag: 'VOL', text: parts.join(' · ') + '.' });
 

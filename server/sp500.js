@@ -1,12 +1,17 @@
-// S&P 500 market breadth: % of index members above their 20/50/200-day SMA.
+// S&P 500 market breadth: % of index members above their 20/50/200-day SMA,
+// plus the ratio-adjusted McClellan Oscillator / Summation Index computed
+// from the same daily bars.
 //
 // Cost model (the whole point of this design):
 // - Constituents: Wikipedia scrape, cached 7 days in memory + on disk.
 // - 50d/200d: Yahoo's batched quote() already returns fiftyDayAverage /
 //   twoHundredDayAverage per symbol — ~4 chunked requests per refresh,
 //   cached 15 min. No history downloads.
-// - 20d: not in quote(); computed from a once-per-day sequential chart()
-//   pass over all members (gentle 400ms gaps). Null until the first pass
+// - 20d + McClellan: not in quote(); computed from a once-per-day sequential
+//   chart() pass over all members (gentle 400ms gaps). The pass fetches ~160
+//   calendar days of daily closes per member: the last 20 feed the SMA, the
+//   full series feeds per-session advance/decline counts for the McClellan
+//   math (EMA39 warmup + ~60 displayed sessions). Null until the first pass
 //   completes (~10 min after first request).
 
 import fs from 'fs';
@@ -77,13 +82,20 @@ async function getConstituents() {
 // The Trending scanner (server/trending.js) reuses the constituent list
 export { getConstituents as getSp500Symbols };
 
-// ---------- 20-day SMA store (once-a-day slow pass) ----------
+// ---------- 20-day SMA + daily-close store (once-a-day slow pass) ----------
 
 const sma20Store = { bySymbol: new Map(), fetchedAt: 0, inflight: false };
+// symbol -> [{ date: 'YYYY-MM-DD', close }] completed sessions, oldest first
+const closesStore = new Map();
 
-async function fetchSma20(symbol) {
+function dateKey(date, tz) {
+  const { y, m, d } = localDateParts(date, tz);
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+async function fetchDaily(symbol) {
   const result = await withTimeout(yahooFinance.chart(symbol, {
-    period1: new Date(Date.now() - 60 * 86400000),
+    period1: new Date(Date.now() - 160 * 86400000),
     interval: '1d',
   }, { validateResult: false }), 15000, `chart(${symbol})`);
   const tz = result?.meta?.exchangeTimezoneName;
@@ -93,28 +105,33 @@ async function fetchSma20(symbol) {
   const completed = sameDate(localDateParts(bars[bars.length - 1].date, tz), today)
     ? bars.slice(0, -1) : bars;
   if (completed.length < 20) return null;
-  const closes = completed.slice(-20).map(b => b.close);
-  return closes.reduce((a, b) => a + b, 0) / 20;
+  const sma20 = completed.slice(-20).reduce((a, b) => a + b.close, 0) / 20;
+  return { sma20, closes: completed.map(b => ({ date: dateKey(b.date, tz), close: b.close })) };
 }
 
 async function refreshSma20(symbols) {
   if (sma20Store.inflight) return;
   sma20Store.inflight = true;
-  console.log(`Refreshing S&P 500 20d SMAs for ${symbols.length} members...`);
+  console.log(`Refreshing S&P 500 daily bars (20d SMA + McClellan) for ${symbols.length} members...`);
   try {
     let done = 0, ok = 0;
     for (const s of symbols) {
       try {
-        const v = await fetchSma20(s);
-        if (v != null) { sma20Store.bySymbol.set(s, v); ok++; }
+        const v = await fetchDaily(s);
+        if (v != null) {
+          sma20Store.bySymbol.set(s, v.sma20);
+          closesStore.set(s, v.closes);
+          ok++;
+        }
       } catch {}
       done++;
-      if (done % 100 === 0) console.log(`S&P 20d SMAs: ${done}/${symbols.length}`);
+      if (done % 100 === 0) console.log(`S&P daily bars: ${done}/${symbols.length}`);
       await new Promise(r => setTimeout(r, SMA_GAP_MS));
     }
     sma20Store.fetchedAt = Date.now();
     breadthCache.fetchedAt = 0; // recompute pctAbove20 on next request
-    console.log(`S&P 500 20d SMAs loaded: ${ok}/${symbols.length}`);
+    computeMcclellan();
+    console.log(`S&P 500 daily bars loaded: ${ok}/${symbols.length}`);
   } finally {
     sma20Store.inflight = false;
   }
@@ -184,6 +201,93 @@ async function computeBreadth() {
     count: quoted,
     asOf: new Date().toISOString(),
   };
+}
+
+// ---------- McClellan Oscillator / Summation Index ----------
+//
+// Ratio-adjusted net advances per session: RANA = 1000·(adv−dec)/(adv+dec),
+// counted across all S&P members with a close on both the session and the
+// prior session. Oscillator = EMA19(RANA) − EMA39(RANA); Summation Index =
+// running sum of the oscillator. Both are computed over the ~110-session
+// window of the daily pass, so the Summation Index level is window-relative
+// (its direction and zero-crossings are the signal, not the absolute level).
+
+const MCC_MIN_MEMBERS = 300;
+const MCC_SERIES_LEN = 60;
+
+const mcclellanStore = { data: null };
+
+function ema(values, period) {
+  // Seeded with the SMA of the first `period` values (McClellan convention);
+  // entries before the seed index are null.
+  const out = new Array(values.length).fill(null);
+  if (values.length < period) return out;
+  let prev = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  out[period - 1] = prev;
+  const k = 2 / (period + 1);
+  for (let i = period; i < values.length; i++) {
+    prev = values[i] * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
+}
+
+function computeMcclellan() {
+  // date -> { adv, dec } across members
+  const byDate = new Map();
+  for (const closes of closesStore.values()) {
+    for (let i = 1; i < closes.length; i++) {
+      if (closes[i].date <= closes[i - 1].date) continue; // guard duplicate bars
+      let rec = byDate.get(closes[i].date);
+      if (!rec) { rec = { adv: 0, dec: 0 }; byDate.set(closes[i].date, rec); }
+      if (closes[i].close > closes[i - 1].close) rec.adv++;
+      else if (closes[i].close < closes[i - 1].close) rec.dec++;
+    }
+  }
+
+  const sessions = [...byDate.entries()]
+    .filter(([, r]) => r.adv + r.dec >= MCC_MIN_MEMBERS)
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (sessions.length < 45) {
+    mcclellanStore.data = null;
+    return;
+  }
+
+  const rana = sessions.map(([, r]) => 1000 * (r.adv - r.dec) / (r.adv + r.dec));
+  const ema19 = ema(rana, 19);
+  const ema39 = ema(rana, 39);
+
+  const series = [];
+  let sum = 0;
+  for (let i = 0; i < sessions.length; i++) {
+    if (ema19[i] == null || ema39[i] == null) continue;
+    const osc = ema19[i] - ema39[i];
+    sum += osc;
+    series.push({ date: sessions[i][0], osc: Math.round(osc * 10) / 10, sum: Math.round(sum) });
+  }
+  if (series.length < 2) {
+    mcclellanStore.data = null;
+    return;
+  }
+
+  const last = series[series.length - 1];
+  const prev = series[series.length - 2];
+  const lastAd = byDate.get(last.date);
+  mcclellanStore.data = {
+    osc: last.osc,
+    prevOsc: prev.osc,
+    summation: last.sum,
+    prevSummation: prev.sum,
+    adv: lastAd.adv,
+    dec: lastAd.dec,
+    asOf: last.date,
+    sessions: series.length,
+    series: series.slice(-MCC_SERIES_LEN),
+  };
+}
+
+export function getMcclellan() {
+  return mcclellanStore.data;
 }
 
 export async function getSpxBreadth() {

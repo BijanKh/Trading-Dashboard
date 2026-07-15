@@ -99,7 +99,7 @@ export default function OverviewTab() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
         <VolPanel volatility={g.volatility} fearGreed={quotes.fearGreed} history={quotes.history} pctiles={quotes.volPctiles} />
         <LeadershipPanel ratios={leadershipRatios} relations={quotes.relations} />
-        <SpxBreadthPanel spx={quotes.spxBreadth} history={quotes.history} />
+        <SpxBreadthPanel spx={quotes.spxBreadth} mcclellan={quotes.mcclellan} history={quotes.history} />
         <BreadthPanel breadth={quotes.breadth} />
         <OptionsLevels walls={optionsData?.walls} />
       </div>

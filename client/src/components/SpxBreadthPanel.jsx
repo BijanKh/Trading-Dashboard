@@ -4,10 +4,18 @@ import InfoTooltip from './InfoTooltip';
 import { BreadthRow } from './BreadthPanel';
 import Sparkline from './Sparkline';
 
-// % of S&P 500 index members above their own 20/50/200-day SMA.
-export default function SpxBreadthPanel({ spx, history }) {
+function oscColor(v) {
+  if (v == null) return colors.text.muted;
+  return v >= 0 ? colors.updown.up : colors.updown.down;
+}
+
+// % of S&P 500 index members above their own 20/50/200-day SMA,
+// plus the McClellan Oscillator / Summation Index from the same members.
+export default function SpxBreadthPanel({ spx, mcclellan, history }) {
   if (!spx) return null;
   const count = spx.count || 0;
+  const mcc = mcclellan;
+  const summRising = mcc && mcc.prevSummation != null ? mcc.summation > mcc.prevSummation : null;
 
   return (
     <div style={{ background: colors.bg.card, border: `1px solid ${colors.bg.border}`, borderRadius: 12, padding: 16 }}>
@@ -35,6 +43,50 @@ export default function SpxBreadthPanel({ spx, history }) {
           <Sparkline data={history.spxAbove50} width={140} />
         </div>
       )}
+
+      <div style={{ borderTop: `1px solid ${colors.bg.border}`, marginTop: 12, paddingTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', fontSize: 11, fontWeight: 600, color: colors.text.secondary, fontFamily: fonts.sans }}>
+          MCCLELLAN OSCILLATOR
+          <InfoTooltip indicatorKey="mcclellan" />
+        </div>
+        {mcc ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginTop: 6 }}>
+              <span style={{ fontSize: 20, fontWeight: 600, fontFamily: fonts.mono, color: oscColor(mcc.osc) }}>
+                {mcc.osc > 0 ? '+' : ''}{Math.round(mcc.osc)}
+              </span>
+              <span style={{ fontSize: 10, fontFamily: fonts.mono, color: colors.text.muted }}>
+                SUMM{' '}
+                <span style={{ color: summRising == null ? colors.text.muted : summRising ? colors.updown.up : colors.updown.down }}>
+                  {summRising == null ? '--' : summRising ? '▲ rising' : '▼ falling'}
+                </span>
+              </span>
+              <span style={{ fontSize: 10, fontFamily: fonts.mono, color: colors.text.muted }}>
+                A/D {mcc.adv}/{mcc.dec}
+              </span>
+            </div>
+            {mcc.series?.length >= 3 && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 9, color: colors.text.muted, fontFamily: fonts.sans, marginBottom: 2 }}>
+                  oscillator — {mcc.series.length} sessions
+                </div>
+                <Sparkline
+                  data={mcc.series.map(p => ({ date: p.date, value: p.osc }))}
+                  width={140}
+                  height={30}
+                  baseline={0}
+                  posColor={colors.updown.up}
+                  negColor={colors.updown.down}
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ fontSize: 10, color: colors.text.muted, fontFamily: fonts.mono, marginTop: 6 }}>
+            computed by the daily pass (~10 min after server start)
+          </div>
+        )}
+      </div>
     </div>
   );
 }
