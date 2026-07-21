@@ -419,6 +419,15 @@ async function fetchAllQuotes() {
         out.sma50 = q?.ref?.sma50 ?? null;
         out.sma200 = q?.ref?.sma200 ?? null;
       }
+      if (groupName === 'space') {
+        const r = bySymbol.get(e.s);
+        out.name = r?.shortName || r?.longName || e.label;
+        out.sma50 = r?.fiftyDayAverage ?? null;
+        out.avgVolume = r?.averageDailyVolume3Month ?? null;
+        out.high52 = r?.fiftyTwoWeekHigh ?? null;
+        out.low52 = r?.fiftyTwoWeekLow ?? null;
+        out.marketCap = r?.marketCap ?? null;
+      }
       return out;
     });
   }
@@ -469,6 +478,12 @@ async function fetchAllQuotes() {
     volPctiles: computeVolPctiles(quoteFor),
     spyHigh20, errors,
   };
+}
+
+// Completed-session close series from the daily pass ([{ d, c }], ~70
+// sessions, oldest first). Used by server/space.js for screener math.
+export function getCloseSeries(symbol) {
+  return dailyRefs.bySymbol.get(symbol)?.series ?? null;
 }
 
 // ---------- cache with stampede guard + stale-on-error ----------

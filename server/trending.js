@@ -430,6 +430,13 @@ async function runScan() {
   console.log('Trending scan starting...');
   try {
     const data = await scan();
+    // Names newly in a top-5 vs the previous scan → feeds the alert strip.
+    const top5 = (list) => (list || []).slice(0, 5).map(r => r.symbol);
+    const entered = (cur, old) => top5(cur).filter(s => !top5(old).includes(s));
+    data.newEntrants = state.data ? {
+      dayLong: entered(data.day.long, state.data.day?.long),
+      dayShort: entered(data.day.short, state.data.day?.short),
+    } : null;
     state.data = data;
     state.scannedAt = Date.now();
     try { fs.writeFileSync(DISK_CACHE, JSON.stringify({ scannedAt: state.scannedAt, data })); } catch {}
@@ -457,6 +464,12 @@ export async function getTrending(force = false) {
     };
   }
   return { status: 'scanning', progress: state.progress };
+}
+
+// Last completed scan without side effects (no lazy rescan trigger).
+// Used by the alert rules on the /api/quotes hot path.
+export function peekTrending() {
+  return state.data;
 }
 
 export function startTrendingScheduler() {

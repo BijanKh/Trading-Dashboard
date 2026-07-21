@@ -23,8 +23,10 @@ import { getOptionsDashboard, invalidateSymbol } from './optionsdash.js';
 import { importIvCsv } from './ivimport.js';
 import { getCot } from './cot.js';
 import { getEcbCurve } from './ecb.js';
-import { getTrending, startTrendingScheduler } from './trending.js';
+import { getTrending, peekTrending, startTrendingScheduler } from './trending.js';
 import { getNews } from './news.js';
+import { getSpace } from './space.js';
+import { getBacktest } from './backtest.js';
 import { evaluateAlerts } from './alerts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -235,10 +237,16 @@ app.get('/api/quotes', async (req, res) => {
       creditComposite: creditSnapshot?.composite ?? null,
     });
     const divergence = computeDivergence(quotes, spxBreadth);
+    // Space screener math reuses this route's cached quotes — cheap. Never
+    // let a screener hiccup break the main quotes payload.
+    let space = null;
+    try { space = await getSpace(); } catch {}
     const alerts = evaluateAlerts({
       quotes, tape, divergence, calendar, mcclellan,
       credit: creditSnapshot,
       creditIndicators: cachedResult?.indicators ?? null,
+      space,
+      trending: peekTrending(),
     });
     res.json({
       ...quotes,
@@ -253,6 +261,21 @@ app.get('/api/quotes', async (req, res) => {
   } catch (err) {
     console.error('Error in /api/quotes:', err);
     res.status(502).json({ error: 'Failed to load quotes.' });
+  }
+});
+
+app.get('/api/backtest', (req, res) => {
+  const out = getBacktest(String(req.query.strategy || ''), req.query.refresh === '1');
+  if (out.error) return res.status(400).json(out);
+  res.json(out);
+});
+
+app.get('/api/space', async (req, res) => {
+  try {
+    res.json(await getSpace());
+  } catch (err) {
+    console.error('Error in /api/space:', err);
+    res.status(502).json({ error: 'Failed to load space screener.' });
   }
 });
 

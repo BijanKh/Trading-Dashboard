@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { colors, fonts } from '../styles/theme';
+import PositionSizer from '../components/PositionSizer';
 
 const Ctx = createContext({ open: () => {} });
 
@@ -8,12 +9,15 @@ export function useChartModal() {
 }
 
 // Click-through charting: any symbol opens a TradingView advanced chart in a
-// modal (free widget embed). Esc or backdrop click closes.
+// modal (free widget embed) with a position-size calculator underneath.
+// open(sym, price) — price optional, prefills the sizer's entry field.
+// Esc or backdrop click closes.
 export function ChartModalProvider({ children }) {
-  const [tvSymbol, setTvSymbol] = useState(null);
+  const [modal, setModal] = useState(null); // { sym, price }
+  const tvSymbol = modal?.sym ?? null;
 
-  const open = useCallback((sym) => { if (sym) setTvSymbol(sym); }, []);
-  const close = useCallback(() => setTvSymbol(null), []);
+  const open = useCallback((sym, price = null) => { if (sym) setModal({ sym, price }); }, []);
+  const close = useCallback(() => setModal(null), []);
 
   useEffect(() => {
     if (!tvSymbol) return;
@@ -38,7 +42,7 @@ export function ChartModalProvider({ children }) {
           <div
             onClick={e => e.stopPropagation()}
             style={{
-              width: 'min(1100px, 96vw)', height: 'min(640px, 84vh)',
+              width: 'min(1100px, 96vw)', height: 'min(720px, 88vh)',
               background: colors.bg.card, border: `1px solid ${colors.bg.border}`,
               borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column',
             }}
@@ -52,6 +56,7 @@ export function ChartModalProvider({ children }) {
               src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tvSymbol)}&interval=D&theme=dark&style=1&locale=en&hidesidetoolbar=0&saveimage=0`}
               style={{ border: 'none', flex: 1, width: '100%' }}
             />
+            <PositionSizer key={tvSymbol} livePrice={modal?.price ?? null} />
           </div>
         </div>
       )}

@@ -102,6 +102,18 @@ export async function fetchTrending(refresh = false) {
   return res.json();
 }
 
+export async function fetchSpace() {
+  const res = await fetch(`${BASE}/api/space`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchBacktest(strategy, refresh = false) {
+  const res = await fetch(`${BASE}/api/backtest?strategy=${encodeURIComponent(strategy)}${refresh ? '&refresh=1' : ''}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function refreshData() {
   const res = await fetch(`${BASE}/api/refresh`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

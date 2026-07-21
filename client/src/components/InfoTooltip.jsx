@@ -98,6 +98,14 @@ const INDICATOR_INFO = {
     source: 'Computed from Yahoo quotes (50/200d) + daily bars (20d); constituents from Wikipedia',
     weight: 'N/A',
   },
+  space: {
+    name: 'Space Sector Screener',
+    short: 'Short-The-Bounce Workflow',
+    description: 'The space/rocket watchlist with everything needed to time shorts into a weak sector: trend filter (price below a FALLING 50-DMA), bounce detection (5-day change + RSI), distance to the declining 12 EMA in volatility units (the classic bounce-short entry is AT the EMA, not deep below it), Bollinger %B oversold/overbought position, plus risk gates — short interest (squeeze fuel), days to cover, earnings proximity (binary events), and liquidity floors (price ≥$5, ≥$20M avg dollar volume). UFO (Procure Space ETF) is the sector benchmark row; the equal-weight index in the header shows the sector trend without cap-weight distortion.',
+    interpretation: 'The default ranking IS the workflow: AT EMA rows first — the bounce has carried price back to the declining 12 EMA, where downtrends typically resume. BOUNCING = watchlist (bounce running, not there yet). EXTENDED = deeply stretched below the EMA — late to chase; wait for the bounce instead. Avoid shorts with SI %float >15-20% (squeeze risk), earnings within a few days, or the "thin" liquidity tag. RSI 45-60 on a bounce below a falling 50-DMA marks a mature bounce.',
+    source: 'Yahoo quotes (45s) + daily close series; short interest & earnings via quoteSummary (12h)',
+    weight: 'N/A',
+  },
   mcclellan: {
     name: 'McClellan Oscillator (S&P 500)',
     short: 'Momentum of Market Breadth',

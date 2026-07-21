@@ -74,7 +74,7 @@ export default function QuoteTable({ title, columns, rows }) {
           {sorted.map((row, i) => (
             <tr
               key={row.id || row.symbol || i}
-              onClick={row.chartSym ? () => open(toTvSymbol(row.chartSym)) : undefined}
+              onClick={row.chartSym ? () => open(toTvSymbol(row.chartSym), row.price ?? null) : undefined}
               style={row.chartSym ? { cursor: 'pointer' } : undefined}
             >
               {columns.map(col => {

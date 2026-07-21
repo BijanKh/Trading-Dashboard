@@ -7,7 +7,7 @@ function groupVal(quotes, group, symbol) {
   return quotes?.groups?.[group]?.find(q => q.symbol === symbol)?.price ?? null;
 }
 
-export function evaluateAlerts({ quotes, tape, credit, creditIndicators, divergence, calendar, mcclellan }) {
+export function evaluateAlerts({ quotes, tape, credit, creditIndicators, divergence, calendar, mcclellan, space, trending }) {
   const alerts = [];
   const add = (id, severity, title, detail) => alerts.push({ id, severity, title, detail });
 
@@ -77,6 +77,27 @@ export function evaluateAlerts({ quotes, tape, credit, creditIndicators, diverge
   if (divergence?.active) {
     add('breadth_divergence', 'stress', 'Breadth divergence',
       `SPY near its 20d high while S&P >50d breadth fell from ${Math.round(divergence.breadth5dAgo * 100)}% to ${Math.round(divergence.breadthNow * 100)}%.`);
+  }
+
+  // Space screener: a name's bounce reached the declining 12 EMA — the
+  // short-entry trigger the tab is built around. Per-symbol per-day ids.
+  const dayET = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+  for (const r of space?.rows || []) {
+    if (r.setup === 'AT EMA' && !r.thin) {
+      add(`space_atema_${r.symbol}_${dayET}`, 'info', `${r.symbol} AT EMA`,
+        `Space short setup: bounce reached the declining 12 EMA (ΔEMA ${r.dEmaVol?.toFixed(1)}, RSI ${r.rsi?.toFixed(0)}).`);
+    }
+  }
+
+  // Trending scan: new names entered a daytrading top-5 on the latest scan.
+  const ne = trending?.newEntrants;
+  if (ne && (ne.dayLong?.length || ne.dayShort?.length)) {
+    const scanDay = (trending.scannedAt || '').slice(0, 10);
+    const parts = [];
+    if (ne.dayLong?.length) parts.push(`long: ${ne.dayLong.join(', ')}`);
+    if (ne.dayShort?.length) parts.push(`short: ${ne.dayShort.join(', ')}`);
+    add(`trending_entrants_${scanDay}`, 'info', 'New trending setups',
+      `New in the daytrading top-5 — ${parts.join(' · ')}.`);
   }
 
   const next = (calendar?.events || [])

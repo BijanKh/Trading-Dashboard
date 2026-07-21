@@ -12,7 +12,7 @@ export default function QuoteTile({ quote, showWtd = false, badge = null }) {
   const { open } = useChartModal();
   if (!quote) return null;
   return (
-    <div onClick={() => open(toTvSymbol(quote.symbol))} style={{
+    <div onClick={() => open(toTvSymbol(quote.symbol), quote.price ?? null)} style={{
       background: colors.bg.card,
       border: `1px solid ${colors.bg.border}`,
       borderRadius: 10,

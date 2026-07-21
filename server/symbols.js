@@ -163,6 +163,33 @@ export const GROUPS = {
     { s: 'DBC', label: 'DB Commodity Index', dec: 2 },
     { s: 'SXRS.DE', label: 'Div Commodity Swap (EUR)', dec: 3 },
   ],
+  // Space tab — the user's space/rocket watchlist (short-the-bounce focus).
+  // UFO (Procure Space ETF) is the sector benchmark row; SPCX (SpaceX) also
+  // appears in megacaps. Labels fall back to Yahoo shortName if a ticker's
+  // company changes (several are recent IPOs / renames).
+  space: [
+    { s: 'UFO', label: 'Procure Space ETF', dec: 2 },
+    { s: 'SPCX', label: 'SpaceX', dec: 2 },
+    { s: 'RKLB', label: 'Rocket Lab', dec: 2 },
+    { s: 'ASTS', label: 'AST SpaceMobile', dec: 2 },
+    { s: 'LUNR', label: 'Intuitive Machines', dec: 2 },
+    { s: 'FLY', label: 'Firefly Aerospace', dec: 2 },
+    { s: 'VOYG', label: 'Voyager Tech', dec: 2 },
+    { s: 'SPIR', label: 'Spire Global', dec: 2 },
+    { s: 'RDW', label: 'Redwire', dec: 2 },
+    { s: 'PL', label: 'Planet Labs', dec: 2 },
+    { s: 'BKSY', label: 'BlackSky Tech', dec: 2 },
+    { s: 'SATL', label: 'Satellogic', dec: 2 },
+    { s: 'MNTS', label: 'Momentus', dec: 2 },
+    { s: 'VELO', label: 'Velo3D', dec: 2 },
+    { s: 'SIDU', label: 'Sidus Space', dec: 2 },
+    { s: 'YSS', label: 'York Space', dec: 2 },
+    { s: 'LPTH', label: 'LightPath', dec: 2 },
+    { s: 'CPSH', label: 'CPS Tech', dec: 2 },
+    { s: 'VPG', label: 'Vishay Precision', dec: 2 },
+    { s: 'KRMN', label: 'Karman', dec: 2 },
+    { s: 'GILT', label: 'Gilat Satellite', dec: 2 },
+  ],
   // fetched only as ratio legs, not displayed as a group
   ratioLegs: [
     { s: 'RSP', label: 'S&P Equal Weight', dec: 2 },

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { fetchTrending } from '../lib/api';
 import QuoteTable from '../components/QuoteTable';
+import BacktestPanel from '../components/BacktestPanel';
 
 // Daily trend scan over S&P 500 + Nasdaq-100 (server/trending.js).
 // Two sections: Setups Daytrading (daily 12 EMA, within 5% of the all-time
@@ -210,6 +211,11 @@ export default function TrendingTab() {
         subtitle="whole universe ranked by negative momentum (lowest RS vs SPY) · below the daily 12 EMA · no 52-week-low condition"
         side="weak"
         rows={data.weakest}
+      />
+
+      <BacktestPanel
+        strategy="trending-long"
+        title="12-EMA PULLBACK LONG (S&P 500, 3Y)"
       />
 
       <div style={{ fontSize: 11, color: colors.text.muted, fontFamily: fonts.mono, lineHeight: 1.6 }}>
