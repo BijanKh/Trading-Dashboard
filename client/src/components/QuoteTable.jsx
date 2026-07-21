@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { fmtPrice, fmtBig } from '../lib/format';
 import Pct from './Pct';
+import HoverChart from './HoverChart';
 import { useChartModal } from '../context/ChartModalContext';
 import { toTvSymbol } from '../lib/tv';
 
@@ -13,9 +14,24 @@ import { toTvSymbol } from '../lib/tv';
 // numeric columns never get pushed out of the visible card — col.max caps
 // the width (default 150px for the name/label column).
 // Rows with a chartSym open a TradingView chart modal on click.
+// Rows with a `spark` close-series show an instant chart popover on hover
+// (after a short delay so fast scrolling doesn't flicker).
 export default function QuoteTable({ title, columns, rows }) {
   const [sort, setSort] = useState({ key: null, dir: -1 });
+  const [hover, setHover] = useState(null); // { row, x, y }
+  const hoverTimer = useRef(null);
   const { open } = useChartModal();
+
+  function onRowEnter(row, e) {
+    if (!row.spark) return;
+    const x = e.clientX, y = e.clientY;
+    clearTimeout(hoverTimer.current);
+    hoverTimer.current = setTimeout(() => setHover({ row, x, y }), 180);
+  }
+  function onRowLeave() {
+    clearTimeout(hoverTimer.current);
+    setHover(null);
+  }
 
   const sorted = useMemo(() => {
     if (!sort.key) return rows;
@@ -75,6 +91,8 @@ export default function QuoteTable({ title, columns, rows }) {
             <tr
               key={row.id || row.symbol || i}
               onClick={row.chartSym ? () => open(toTvSymbol(row.chartSym), row.price ?? null) : undefined}
+              onMouseEnter={row.spark ? (e) => onRowEnter(row, e) : undefined}
+              onMouseLeave={row.spark ? onRowLeave : undefined}
               style={row.chartSym ? { cursor: 'pointer' } : undefined}
             >
               {columns.map(col => {
@@ -111,6 +129,15 @@ export default function QuoteTable({ title, columns, rows }) {
           ))}
         </tbody>
       </table>
+      {hover && (
+        <HoverChart
+          symbol={hover.row.symbol}
+          closes={hover.row.spark}
+          tf={hover.row.sparkTf}
+          x={hover.x}
+          y={hover.y}
+        />
+      )}
     </div>
   );
 }

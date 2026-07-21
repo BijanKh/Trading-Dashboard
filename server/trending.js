@@ -190,6 +190,12 @@ async function fetchWeeklyHistory(symbol) {
   return bars;
 }
 
+// Compact close tail for the hover chart popover (5 significant digits
+// keeps the persisted JSON small).
+function sparkTail(closes, n = 120) {
+  return closes.slice(-n).map(v => Number(v.toPrecision(5)));
+}
+
 function enrichDaily(c, daily) {
   const closes = daily.map(b => b.close);
   c.ema12d = ema(closes, 12);
@@ -197,10 +203,13 @@ function enrichDaily(c, daily) {
   c.r21 = retN(closes, 21);
   c.r63 = retN(closes, 63);
   c.r126 = retN(closes, 126);
+  c.sparkD = sparkTail(closes);
 }
 
 function enrichWeekly(c, weekly) {
-  c.ema12w = ema(weekly.map(b => b.close), 12);
+  const closes = weekly.map(b => b.close);
+  c.ema12w = ema(closes, 12);
+  c.sparkW = sparkTail(closes);
   c.atr14w = atr(weekly.slice(-120), 14); // recent regime, not 1990s vol
 
   let ath = null;
@@ -248,6 +257,8 @@ function buildRow(c, side, tf) {
     emaDistAtr,
     rs: c.rs ?? null,
     setup,
+    spark: (tf === 'day' ? c.sparkD : c.sparkW) ?? null,
+    sparkTf: tf,
   };
 }
 
@@ -388,6 +399,8 @@ async function scan() {
       setup: emaDistAtr == null ? null
         : Math.abs(emaDistAtr) <= PULLBACK_ATR ? 'PULLBACK'
         : Math.abs(emaDistAtr) <= EXTENDED_ATR ? 'TRENDING' : 'EXTENDED',
+      spark: c.sparkD ?? null,
+      sparkTf: 'day',
     };
   };
   const momentum = infos

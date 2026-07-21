@@ -105,6 +105,9 @@ function computeRow(q, spyR21) {
 
   if (!closes || closes.length < 21) return out;
   const withLive = [...closes, price];
+  // Close tail incl. live price for the hover-chart popover
+  out.spark = withLive.slice(-120).map(v => Number(v.toPrecision(5)));
+  out.sparkTf = 'day';
 
   out.r5 = closes.length >= 5 ? price / closes[closes.length - 5] - 1 : null;
   out.rsi = rsi14(withLive);

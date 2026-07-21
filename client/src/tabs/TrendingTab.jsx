@@ -41,6 +41,8 @@ function SetupTable({ title, side, rows }) {
     emaDistAtr: r.emaDistAtr,
     rs: r.rs,
     setup: r.setup,
+    spark: r.spark ?? null,
+    sparkTf: r.sparkTf ?? null,
     dec: 2,
   }));
   return <QuoteTable title={title} columns={COLS(side)} rows={tableRows} />;
@@ -76,6 +78,8 @@ function MomentumSection({ title, subtitle, side, rows }) {
     emaDistAtr: r.emaDistAtr,
     rs: r.rs,
     setup: r.setup,
+    spark: r.spark ?? null,
+    sparkTf: r.sparkTf ?? null,
     dec: 2,
   }));
   return (

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { fetchSpace } from '../lib/api';
 import { fmtPrice, fmtPct, fmtBig } from '../lib/format';
@@ -9,6 +9,7 @@ import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
 import { useChartModal } from '../context/ChartModalContext';
 import { toTvSymbol } from '../lib/tv';
 import BacktestPanel from '../components/BacktestPanel';
+import HoverChart from '../components/HoverChart';
 
 // Space-sector screener — short-the-bounce workflow. Server math in
 // server/space.js; this renders the composite strip + sortable table.
@@ -81,7 +82,20 @@ export default function SpaceTab() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [sort, setSort] = useState({ key: null, dir: -1 });
+  const [hover, setHover] = useState(null); // { row, x, y }
+  const hoverTimer = useRef(null);
   const { open } = useChartModal();
+
+  function onRowEnter(row, e) {
+    if (!row.spark) return;
+    const x = e.clientX, y = e.clientY;
+    clearTimeout(hoverTimer.current);
+    hoverTimer.current = setTimeout(() => setHover({ row, x, y }), 180);
+  }
+  function onRowLeave() {
+    clearTimeout(hoverTimer.current);
+    setHover(null);
+  }
 
   const load = useCallback(async () => {
     try {
@@ -197,6 +211,8 @@ export default function SpaceTab() {
                 <tr
                   key={r.symbol}
                   onClick={() => open(toTvSymbol(r.symbol), r.price ?? null)}
+                  onMouseEnter={(e) => onRowEnter(r, e)}
+                  onMouseLeave={onRowLeave}
                   style={{ cursor: 'pointer', background: isBench ? colors.bg.cardHover : undefined }}
                 >
                   {COLS.map(col => {
@@ -273,6 +289,15 @@ export default function SpaceTab() {
             })}
           </tbody>
         </table>
+        {hover && (
+          <HoverChart
+            symbol={hover.row.symbol}
+            closes={hover.row.spark}
+            tf={hover.row.sparkTf}
+            x={hover.x}
+            y={hover.y}
+          />
+        )}
       </div>
 
       <BacktestPanel
