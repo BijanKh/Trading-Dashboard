@@ -153,6 +153,18 @@ function isoWeekStartDays(date, tz) {
 
 // ---------- per-candidate history (two chart() calls each) ----------
 
+// True once the regular session of the chart's current trading day has
+// ended. Post-close scans (the 16:45 ET cron, evening rescans) land here:
+// the today bar is then complete and must NOT be dropped, or the EMA lags
+// one session behind the quote price it gets compared against — marginal
+// shorts can end up above the properly-computed 12 EMA (and longs below).
+function sessionClosed(meta) {
+  const end = meta?.currentTradingPeriod?.regular?.end;
+  if (end == null) return false;
+  const t = end instanceof Date ? end.getTime() : end * 1000;
+  return Date.now() >= t;
+}
+
 // ~420 calendar days of daily bars: EMA12/ATR14 daily + 1/3/6-month returns
 async function fetchDailyBars(symbol) {
   const result = await withTimeout(yahooFinance.chart(symbol, {
@@ -165,7 +177,8 @@ async function fetchDailyBars(symbol) {
 
   // Completed sessions only — drop a still-forming today bar
   const today = localDateParts(new Date(), tz);
-  if (bars.length && sameDate(localDateParts(bars[bars.length - 1].date, tz), today)) {
+  if (bars.length && sameDate(localDateParts(bars[bars.length - 1].date, tz), today)
+      && !sessionClosed(result?.meta)) {
     bars = bars.slice(0, -1);
   }
   return bars;
@@ -182,18 +195,27 @@ async function fetchWeeklyHistory(symbol) {
   const tz = result?.meta?.exchangeTimezoneName;
   let bars = (result?.quotes || []).filter(q => q.close != null && isFinite(q.close));
 
-  // Completed weeks only — drop the still-forming current week
-  const nowWeek = isoWeekStartDays(new Date(), tz);
-  while (bars.length && isoWeekStartDays(bars[bars.length - 1].date, tz) >= nowWeek) {
-    bars = bars.slice(0, -1);
+  // Completed weeks only — drop the still-forming current week. On the
+  // weekend, or Friday after the close, the current week IS complete
+  // (same off-by-one as the daily bars for Friday-evening cron scans).
+  const { y, m, d } = localDateParts(new Date(), tz);
+  const dow = (Math.floor(Date.UTC(y, m - 1, d) / 86400000) + 4) % 7; // 0=Sun..6=Sat
+  const weekComplete = dow === 0 || dow === 6 || (dow === 5 && sessionClosed(result?.meta));
+  if (!weekComplete) {
+    const nowWeek = isoWeekStartDays(new Date(), tz);
+    while (bars.length && isoWeekStartDays(bars[bars.length - 1].date, tz) >= nowWeek) {
+      bars = bars.slice(0, -1);
+    }
   }
   return bars;
 }
 
-// Compact close tail for the hover chart popover (5 significant digits
-// keeps the persisted JSON small).
-function sparkTail(closes, n = 120) {
-  return closes.slice(-n).map(v => Number(v.toPrecision(5)));
+// Compact OHLC tail for the hover candle popover (5 significant digits
+// keeps the persisted JSON small). Missing O/H/L fall back to the close.
+function sparkTail(bars, n = 120) {
+  return bars.slice(-n).map(b =>
+    [b.open, b.high, b.low, b.close].map(v =>
+      Number((v != null && isFinite(v) ? v : b.close).toPrecision(5))));
 }
 
 function enrichDaily(c, daily) {
@@ -203,13 +225,13 @@ function enrichDaily(c, daily) {
   c.r21 = retN(closes, 21);
   c.r63 = retN(closes, 63);
   c.r126 = retN(closes, 126);
-  c.sparkD = sparkTail(closes);
+  c.sparkD = sparkTail(daily);
 }
 
 function enrichWeekly(c, weekly) {
   const closes = weekly.map(b => b.close);
   c.ema12w = ema(closes, 12);
-  c.sparkW = sparkTail(closes);
+  c.sparkW = sparkTail(weekly);
   c.atr14w = atr(weekly.slice(-120), 14); // recent regime, not 1990s vol
 
   let ath = null;
