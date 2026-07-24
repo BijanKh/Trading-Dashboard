@@ -78,6 +78,9 @@ export default function OptionsTab() {
   const exp = data?.expiries?.[expiryIdx];
   const strikes = exp?.strikes || [];
   const gexData = (data?.gamma?.profile || []).map(p => ({ strike: p.strike, gex: p.gex / 1e6 }));
+  const nearDays = (n) => (data?.expiries || []).reduce((b, e) => !b || Math.abs(e.days - n) < Math.abs(b.days - n) ? e : b, null);
+  const em3 = nearDays(90), em6 = nearDays(180);
+  const longDated = (data?.expiries || []).filter(e => e.days >= 45);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -144,6 +147,11 @@ export default function OptionsTab() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
             <Tile label="IV30" value={pf(data.iv30)}
               sub={data.ivRank != null ? `IV rank ${(data.ivRank * 100).toFixed(0)}% (${data.ivRankDays}d)` : `rank builds (${data.ivRankDays}/10d)`} />
+            <Tile label="IV90 / IV180" value={`${pf(data.iv90)} / ${pf(data.iv180)}`}
+              sub={data.iv90Rank != null ? `IV90 rank ${(data.iv90Rank * 100).toFixed(0)}% (${data.iv90RankDays}d)` : `rank builds (${data.iv90RankDays ?? 0}/10d)`} />
+            <Tile label="TERM SLOPE (IV90−IV30)" value={data.termSlope != null ? `${data.termSlope > 0 ? '+' : ''}${(data.termSlope * 100).toFixed(1)}pp` : '--'}
+              sub={data.termSlope != null ? (data.termSlope < -0.01 ? 'inverted — long-dated cheap vs front' : data.termSlope > 0.03 ? 'steep — long-dated carries premium' : 'normal contango') : ''}
+              color={data.termSlope != null && data.termSlope < -0.01 ? colors.regime.CALM : undefined} />
             <Tile
               label={`IV RANGE (${data.ivRankDays}d tracked)`}
               value={data.ivLow != null && data.ivHigh != null ? `${pf(data.ivLow)} – ${pf(data.ivHigh)}` : '--'}
@@ -154,14 +162,23 @@ export default function OptionsTab() {
             />
             <Tile label="REALIZED VOL 20d" value={pf(data.rv20)}
               sub={data.vrp != null ? `VRP ${data.vrp > 0 ? '+' : ''}${(data.vrp * 100).toFixed(1)}pp ${data.vrp > 0.05 ? '— options rich' : data.vrp < -0.02 ? '— options cheap' : ''}` : ''} />
+            <Tile label="VRP 3M / 6M" value={`${data.vrp90 != null ? `${data.vrp90 > 0 ? '+' : ''}${(data.vrp90 * 100).toFixed(1)}` : '--'} / ${data.vrp180 != null ? `${data.vrp180 > 0 ? '+' : ''}${(data.vrp180 * 100).toFixed(1)}` : '--'}pp`}
+              sub={`IV90 vs RV63 · IV180 vs RV126${data.vrp90 != null && data.vrp90 < -0.02 ? ' — 3M options cheap' : data.vrp90 != null && data.vrp90 > 0.05 ? ' — 3M options rich' : ''}`}
+              color={data.vrp90 != null && data.vrp90 < -0.02 ? colors.regime.CALM : undefined} />
             <Tile label={`EXPECTED MOVE ${data.expiries?.[0]?.expiry?.slice(5) || ''}`} value={data.expiries?.[0]?.expectedMovePct != null ? `±${pf(data.expiries[0].expectedMovePct)}` : '--'}
-              sub={data.expiries?.length > 3 && data.expiries[3]?.expectedMovePct != null ? `±${pf(data.expiries[3].expectedMovePct)} by ${data.expiries[3].expiry.slice(5)}` : ''} />
+              sub={[
+                em3?.expectedMovePct != null && em3.days >= 45 ? `±${pf(em3.expectedMovePct)} by ${em3.expiry.slice(5)}` : null,
+                em6?.expectedMovePct != null && em6 !== em3 && em6.days >= 120 ? `±${pf(em6.expectedMovePct)} by ${em6.expiry.slice(5)}` : null,
+              ].filter(Boolean).join(' · ')} />
             <Tile label="MAX PAIN (nearest)" value={exp?.maxPain ?? '--'}
               sub={data.spot && exp?.maxPain ? `${((exp.maxPain / data.spot - 1) * 100).toFixed(1)}% from spot` : ''} />
             <Tile label="PUT WALL / CALL WALL" value={`${exp?.putWall?.strike ?? '--'} / ${exp?.callWall?.strike ?? '--'}`}
               sub={`P/C OI ${exp?.pcOIRatio?.toFixed(2) ?? '--'} · vol ${exp?.pcVolRatio?.toFixed(2) ?? '--'}`} />
             <Tile label="SKEW (25Δ approx)" value={data.skew?.spread != null ? `${(data.skew.spread * 100).toFixed(1)}pp` : '--'}
-              sub={data.skew?.spread != null ? (data.skew.spread > 0.06 ? 'downside fear expensive' : data.skew.spread < 0.01 ? 'flat — complacent' : 'normal') : ''}
+              sub={[
+                data.skew?.spread != null ? (data.skew.spread > 0.06 ? 'downside fear expensive' : data.skew.spread < 0.01 ? 'flat — complacent' : 'normal') : null,
+                data.skew90?.spread != null ? `90d: ${(data.skew90.spread * 100).toFixed(1)}pp` : null,
+              ].filter(Boolean).join(' · ')}
               color={data.skew?.spread > 0.06 ? colors.regime.STRESS : undefined} />
             <Tile label="HEDGE COST (5% OTM put)" value={pf(data.hedgeCostPct)} sub={data.hedgeStrike ? `strike ${data.hedgeStrike} · ${data.skew?.expiry?.slice(5)}` : ''} />
             <Tile label="NET GEX (est)" value={data.gamma?.totalGex != null ? `${(data.gamma.totalGex / 1e9).toFixed(2)}B` : '--'}
@@ -178,7 +195,7 @@ export default function OptionsTab() {
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart data={(data.termStructure || []).filter(t => t.atmIV != null)} margin={{ top: 5, right: 16, bottom: 5, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={colors.chart.grid} />
-                  <XAxis dataKey="days" tick={{ fontSize: 10, fill: colors.chart.axis, fontFamily: fonts.mono }} unit="d" />
+                  <XAxis dataKey="days" type="number" domain={['dataMin', 'dataMax']} tick={{ fontSize: 10, fill: colors.chart.axis, fontFamily: fonts.mono }} unit="d" />
                   <YAxis tick={{ fontSize: 10, fill: colors.chart.axis, fontFamily: fonts.mono }} tickFormatter={v => `${(v * 100).toFixed(0)}%`} width={44} domain={['auto', 'auto']} />
                   <Tooltip content={<DarkTooltip fmt={v => pf(v)} />} />
                   <Line type="monotone" dataKey="atmIV" name="ATM IV" stroke="#FBBF24" strokeWidth={2} dot={{ fill: '#FBBF24', r: 3.5 }} />
@@ -209,6 +226,54 @@ export default function OptionsTab() {
               </ResponsiveContainer>
             </div>
           </div>
+
+          {/* Long-dated buyer table (3-6 month horizon) */}
+          {longDated.length > 0 && (
+            <div style={{ background: colors.bg.card, border: `1px solid ${colors.bg.border}`, borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: colors.text.secondary, fontFamily: fonts.sans, marginBottom: 4 }}>
+                LONG-DATED BUYER VIEW (45d+)
+              </div>
+              <div style={{ fontSize: 10, color: colors.text.muted, fontFamily: fonts.sans, marginBottom: 8 }}>
+                ATM mid prices and breakeven moves for buying 3–6 month options — compare premium vs the expected move
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: fonts.mono }}>
+                  <thead>
+                    <tr style={{ color: colors.text.muted, fontSize: 10, textAlign: 'right' }}>
+                      <th style={{ textAlign: 'left', padding: '3px 8px 3px 0' }}>EXPIRY</th>
+                      <th style={{ padding: '3px 8px' }}>ATM IV</th>
+                      <th style={{ padding: '3px 8px' }}>EXP MOVE</th>
+                      <th style={{ padding: '3px 8px' }}>ATM K</th>
+                      <th style={{ padding: '3px 8px' }}>CALL MID</th>
+                      <th style={{ padding: '3px 8px' }}>CALL BE</th>
+                      <th style={{ padding: '3px 8px' }}>PUT MID</th>
+                      <th style={{ padding: '3px 8px' }}>PUT BE</th>
+                      <th style={{ padding: '3px 0 3px 8px' }}>MAX PAIN</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {longDated.map((e) => (
+                      <tr key={e.expiry} style={{ borderTop: `1px solid ${colors.bg.border}` }}>
+                        <td style={{ color: colors.text.primary, padding: '4px 8px 4px 0' }}>{e.expiry} <span style={{ color: colors.text.muted }}>({e.days}d)</span></td>
+                        <td style={{ color: colors.text.primary, padding: '4px 8px', textAlign: 'right' }}>{pf(e.atmIV)}</td>
+                        <td style={{ color: colors.text.secondary, padding: '4px 8px', textAlign: 'right' }}>{e.expectedMovePct != null ? `±${pf(e.expectedMovePct)}` : '--'}</td>
+                        <td style={{ color: colors.text.secondary, padding: '4px 8px', textAlign: 'right' }}>{e.atmStrike ?? '--'}</td>
+                        <td style={{ color: colors.updown.up, padding: '4px 8px', textAlign: 'right' }}>
+                          {e.atmCallMid != null ? `${e.atmCallMid.toFixed(2)} (${pf(e.atmCallMid / data.spot)})` : '--'}
+                        </td>
+                        <td style={{ color: colors.text.secondary, padding: '4px 8px', textAlign: 'right' }}>{e.callBEPct != null ? `+${(e.callBEPct * 100).toFixed(1)}%` : '--'}</td>
+                        <td style={{ color: colors.updown.down, padding: '4px 8px', textAlign: 'right' }}>
+                          {e.atmPutMid != null ? `${e.atmPutMid.toFixed(2)} (${pf(e.atmPutMid / data.spot)})` : '--'}
+                        </td>
+                        <td style={{ color: colors.text.secondary, padding: '4px 8px', textAlign: 'right' }}>{e.putBEPct != null ? `${(e.putBEPct * 100).toFixed(1)}%` : '--'}</td>
+                        <td style={{ color: colors.text.muted, padding: '4px 0 4px 8px', textAlign: 'right' }}>{e.maxPain ?? '--'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* OI by strike with expiry selector */}
           <div style={{ background: colors.bg.card, border: `1px solid ${colors.bg.border}`, borderRadius: 12, padding: 16 }}>
@@ -279,7 +344,9 @@ export default function OptionsTab() {
 
           <div style={{ fontSize: 10, color: colors.text.muted, fontFamily: fonts.mono, lineHeight: 1.6 }}>
             Yahoo delayed chains (~15 min); IVs approximate. GEX uses Black-Scholes gamma with the standard dealer assumption (long calls / short puts) — treat flip level as an estimate.
-            Server caches each symbol for 10 minutes. IV rank builds from daily IV30 records and becomes meaningful after ~2 weeks per symbol.
+            Server caches each symbol for 10 minutes. IV rank builds from daily IV30/IV90 records and becomes meaningful after ~2 weeks per symbol.
+            Fetched chains: the first 4 expirations plus those closest to 60/90/135/180 days — IV90/IV180, term slope, 3M/6M VRP and the long-dated table cover the 3–6 month buying horizon.
+            Breakevens are at-expiry moves for long ATM options; long-dated mids on thin names can be wide — check the real bid/ask before trading.
           </div>
         </>
       )}

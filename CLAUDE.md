@@ -76,9 +76,15 @@ dashboard/
 │   ├── options.js             # Yahoo option chains: SPY/QQQ OI walls, implied earnings moves
 │   ├── cot.js                 # CFTC COT via Socrata (weekly, 9 markets, 1y percentile)
 │   ├── optionsdash.js         # Per-ticker options dashboard (GET /api/options-dash?symbol=X):
-│   │                          #   IV30/term structure/skew, expected moves, max pain, OI walls,
-│   │                          #   IV vs RV20, unusual activity, BS dealer-gamma profile + flip.
-│   │                          #   10min LRU cache; IV30 recorded daily to metric_history for IV rank.
+│   │                          #   chains = first 4 expirations + closest to 30/60/90/135/180d.
+│   │                          #   IV30/60/90/180 (interpolated; long tenors null rather than >25%
+│   │                          #   extrapolated), term slope IV90−IV30, skew at ~30d AND ~90d,
+│   │                          #   expected moves, max pain, OI walls (strike window widens with
+│   │                          #   tenor), VRP at matched windows (IV30−RV20, IV90−RV63,
+│   │                          #   IV180−RV126), per-expiry ATM mids + breakevens (long-dated
+│   │                          #   buyer table, user buys 3-6mo options), unusual activity,
+│   │                          #   BS dealer-gamma profile + flip. 10min LRU cache; IV30 + IV90
+│   │                          #   recorded daily to metric_history for IV rank.
 │   ├── backtest.js            # Entry-rule backtester (GET /api/backtest?strategy=trending-long|
 │   │                          #   space-short[&refresh=1]): simulates the Trending 12-EMA pullback
 │   │                          #   long and Space AT-EMA short over 3y/5y daily OHLC, stop 1.5×vol20,

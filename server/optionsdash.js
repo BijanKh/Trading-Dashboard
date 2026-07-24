@@ -9,7 +9,8 @@ import { yahooFinance, withTimeout } from './yahoo.js';
 import { saveMetrics, getMetricSeries } from './db.js';
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
-const MAX_EXPIRIES = 6;
+const NEAR_EXPIRIES = 4;              // always take the first N listed expirations
+const TARGET_DAYS = [30, 60, 90, 135, 180]; // plus the chain closest to each of these tenors
 const MAX_CACHE = 20;
 const RISK_FREE = 0.04;
 
@@ -65,11 +66,13 @@ function walls(chain) {
   };
 }
 
-function strikeProfile(chain, spot) {
+function strikeProfile(chain, spot, days) {
+  // Long-dated expiries need a wider strike window than the ±20% that fits front-month
+  const width = Math.min(0.5, Math.max(0.2, 0.2 * Math.sqrt((days || 30) / 30)));
   const byStrike = new Map();
   const add = (list, side) => {
     for (const c of list || []) {
-      if (c.strike < spot * 0.8 || c.strike > spot * 1.2) continue;
+      if (c.strike < spot * (1 - width) || c.strike > spot * (1 + width)) continue;
       const row = byStrike.get(c.strike) || { strike: c.strike, callOI: 0, putOI: 0, callVol: 0, putVol: 0 };
       row[`${side}OI`] += c.openInterest || 0;
       row[`${side}Vol`] += c.volume || 0;
@@ -118,21 +121,56 @@ function gammaProfile(chains, spot) {
   return { profile, totalGex: total, flipLevel: flip };
 }
 
-async function fetchRealizedVol(symbol) {
+function realizedVol(closes, window) {
+  if (closes.length < window + 1) return null;
+  const rets = [];
+  for (let i = closes.length - window; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const variance = rets.reduce((a, r) => a + (r - mean) ** 2, 0) / (rets.length - 1);
+  return Math.sqrt(variance * 252);
+}
+
+// 20/63/126 trading days ≈ 1M/3M/6M — matched against IV30/IV90/IV180
+async function fetchRealizedVols(symbol) {
   try {
     const result = await withTimeout(yahooFinance.chart(symbol, {
-      period1: new Date(Date.now() - 60 * 86400000), interval: '1d',
+      period1: new Date(Date.now() - 550 * 86400000), interval: '1d',
     }, { validateResult: false }), 15000, `chart(${symbol})`);
     const closes = (result?.quotes || []).map(q => q.close).filter(c => c != null && isFinite(c));
-    if (closes.length < 21) return null;
-    const rets = [];
-    for (let i = closes.length - 20; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
-    const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
-    const variance = rets.reduce((a, r) => a + (r - mean) ** 2, 0) / (rets.length - 1);
-    return Math.sqrt(variance * 252);
+    return { rv20: realizedVol(closes, 20), rv63: realizedVol(closes, 63), rv126: realizedVol(closes, 126) };
   } catch {
-    return null;
+    return { rv20: null, rv63: null, rv126: null };
   }
+}
+
+// Interpolated ATM IV at a target tenor. Strict mode refuses to extrapolate
+// more than 25% away from the target (no fake IV180 from a 90d chain).
+function ivAtDays(withIV, target, strict = true) {
+  if (!withIV.length) return null;
+  const before = [...withIV].reverse().find(e => e.days <= target);
+  const after = withIV.find(e => e.days >= target);
+  if (before && after && after.days !== before.days) {
+    const t = (target - before.days) / (after.days - before.days);
+    return before.atmIV + t * (after.atmIV - before.atmIV);
+  }
+  const pick = after || before;
+  if (!pick) return null;
+  if (strict && Math.abs(pick.days - target) > target * 0.25) return null;
+  return pick.atmIV;
+}
+
+// 95% put IV vs 105% call IV on one chain
+function skewFor(chain, spot) {
+  const nearestIV = (list, target) => (list || [])
+    .filter(c => c.impliedVolatility > 0.005)
+    .reduce((b, c) => !b || Math.abs(c.strike - target) < Math.abs(b.strike - target) ? c : b, null)?.impliedVolatility ?? null;
+  const putIV = nearestIV(chain.puts, spot * 0.95);
+  const callIV = nearestIV(chain.calls, spot * 1.05);
+  return {
+    putIV, callIV,
+    spread: putIV != null && callIV != null ? putIV - callIV : null,
+    expiry: new Date(chain.expirationDate).toISOString().slice(0, 10),
+  };
 }
 
 async function buildDashboard(symbol) {
@@ -144,7 +182,19 @@ async function buildDashboard(symbol) {
   const expirations = listing?.expirationDates || [];
   if (!spot || expirations.length === 0) throw new Error('No options listed for this symbol');
 
-  const wanted = expirations.slice(0, MAX_EXPIRIES);
+  // Near-term chains plus the chain closest to each target tenor (60-180d),
+  // so the 3-6 month buyer horizon is covered without fetching every expiry.
+  const nowSel = Date.now();
+  const withDaysAll = expirations
+    .map(d => ({ d, days: (new Date(d).getTime() - nowSel) / 86400000 }))
+    .filter(e => e.days > -1);
+  const picked = new Map();
+  for (const e of withDaysAll.slice(0, NEAR_EXPIRIES)) picked.set(new Date(e.d).getTime(), e.d);
+  for (const target of TARGET_DAYS) {
+    const best = withDaysAll.reduce((b, e) => !b || Math.abs(e.days - target) < Math.abs(b.days - target) ? e : b, null);
+    if (best) picked.set(new Date(best.d).getTime(), best.d);
+  }
+  const wanted = [...picked.values()].sort((a, b) => new Date(a) - new Date(b));
   const chains = [];
   for (const exp of wanted) {
     const first = listing.options?.[0];
@@ -178,33 +228,32 @@ async function buildDashboard(symbol) {
       expectedMovePct: cm != null && pm != null ? (cm + pm) / spot : null,
       maxPain: maxPain(chain),
       ...w,
-      strikes: strikeProfile(chain, spot),
+      atmStrike: atmCall?.strike ?? null,
+      atmCallMid: cm,
+      atmPutMid: pm,
+      // Breakeven at expiry as % move from spot (long ATM call / long ATM put)
+      callBEPct: atmCall && cm != null ? (atmCall.strike + cm) / spot - 1 : null,
+      putBEPct: atmCall && pm != null ? (atmCall.strike - pm) / spot - 1 : null,
+      strikes: strikeProfile(chain, spot, days),
     };
   });
 
-  // IV30: interpolate ATM IV around 30 days
+  // Interpolated ATM IV at the tenors we care about (30d loose like before,
+  // longer tenors strict — null rather than a misleading extrapolation)
   const withIV = perExpiry.filter(e => e.atmIV != null);
-  let iv30 = null;
-  if (withIV.length) {
-    const before = [...withIV].reverse().find(e => e.days <= 30);
-    const after = withIV.find(e => e.days >= 30);
-    if (before && after && after.days !== before.days) {
-      const t = (30 - before.days) / (after.days - before.days);
-      iv30 = before.atmIV + t * (after.atmIV - before.atmIV);
-    } else {
-      iv30 = (after || before || withIV[withIV.length - 1]).atmIV;
-    }
-  }
+  const iv30 = ivAtDays(withIV, 30, false);
+  const iv60 = ivAtDays(withIV, 60);
+  const iv90 = ivAtDays(withIV, 90);
+  const iv180 = ivAtDays(withIV, 180);
 
-  // Skew on the expiry closest to 30d: 95% put IV vs 105% call IV
-  const skewChain = chains[perExpiry.indexOf(
-    perExpiry.reduce((b, e) => !b || Math.abs(e.days - 30) < Math.abs(b.days - 30) ? e : b, null)
+  // Skew on the expiries closest to 30d and 90d
+  const chainNear = (target) => chains[perExpiry.indexOf(
+    perExpiry.reduce((b, e) => !b || Math.abs(e.days - target) < Math.abs(b.days - target) ? e : b, null)
   )] || chains[chains.length - 1];
-  const nearestIV = (list, target) => (list || [])
-    .filter(c => c.impliedVolatility > 0.005)
-    .reduce((b, c) => !b || Math.abs(c.strike - target) < Math.abs(b.strike - target) ? c : b, null)?.impliedVolatility ?? null;
-  const putIV = nearestIV(skewChain.puts, spot * 0.95);
-  const callIV = nearestIV(skewChain.calls, spot * 1.05);
+  const skewChain = chainNear(30);
+  const skew90Chain = chainNear(90);
+  const { putIV, callIV } = skewFor(skewChain, spot);
+  const skew90 = skew90Chain !== skewChain ? skewFor(skew90Chain, spot) : null;
 
   // Hedge cost: ~5% OTM put on that same expiry
   const hedgePut = (skewChain.puts || [])
@@ -226,14 +275,16 @@ async function buildDashboard(symbol) {
   }
   unusual.sort((a, b) => b.volume - a.volume);
 
-  const rv20 = await fetchRealizedVol(symbol);
+  const { rv20, rv63, rv126 } = await fetchRealizedVols(symbol);
   const gamma = gammaProfile(chains, spot);
 
   // IV history for rank (builds up over time)
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
   const metricKey = `iv30_${symbol}`;
-  if (iv30 != null) {
-    saveMetrics(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()), { [metricKey]: iv30 });
-  }
+  const toSave = {};
+  if (iv30 != null) toSave[metricKey] = iv30;
+  if (iv90 != null) toSave[`iv90_${symbol}`] = iv90;
+  if (Object.keys(toSave).length) saveMetrics(today, toSave);
   const ivSeries = getMetricSeries(metricKey, 252);
   let ivRank = null, ivHigh = null, ivLow = null, pctFromHigh = null, pctFromLow = null;
   if (ivSeries.length > 0 && iv30 != null) {
@@ -246,6 +297,13 @@ async function buildDashboard(symbol) {
       ivRank = (iv30 - ivLow) / (ivHigh - ivLow);
     }
   }
+  const iv90Series = getMetricSeries(`iv90_${symbol}`, 252);
+  let iv90Rank = null;
+  if (iv90Series.length >= 10 && iv90 != null) {
+    const vals = iv90Series.map(r => r.value);
+    const hi = Math.max(...vals, iv90), lo = Math.min(...vals, iv90);
+    if (hi > lo) iv90Rank = (iv90 - lo) / (hi - lo);
+  }
 
   return {
     symbol,
@@ -253,15 +311,26 @@ async function buildDashboard(symbol) {
     spot,
     name: listing.quote?.longName || listing.quote?.shortName || symbol,
     iv30,
+    iv60,
+    iv90,
+    iv180,
     ivRank,
     ivRankDays: ivSeries.length,
+    iv90Rank,
+    iv90RankDays: iv90Series.length,
+    termSlope: iv30 != null && iv90 != null ? iv90 - iv30 : null,
     ivHigh,
     ivLow,
     pctFromHigh,
     pctFromLow,
     rv20,
+    rv63,
+    rv126,
     vrp: iv30 != null && rv20 != null ? iv30 - rv20 : null,
+    vrp90: iv90 != null && rv63 != null ? iv90 - rv63 : null,
+    vrp180: iv180 != null && rv126 != null ? iv180 - rv126 : null,
     skew: { putIV, callIV, spread: putIV != null && callIV != null ? putIV - callIV : null, expiry: new Date(skewChain.expirationDate).toISOString().slice(0, 10) },
+    skew90,
     hedgeCostPct: hedgeMid != null ? hedgeMid / spot : null,
     hedgeStrike: hedgePut?.strike ?? null,
     termStructure: perExpiry.map(e => ({ expiry: e.expiry, days: e.days, atmIV: e.atmIV })),
