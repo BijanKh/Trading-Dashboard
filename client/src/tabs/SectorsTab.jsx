@@ -4,6 +4,7 @@ import { useQuotes } from '../context/QuotesContext';
 import SectorHeatmap from '../components/SectorHeatmap';
 import QuoteTable from '../components/QuoteTable';
 import RRGChart from '../components/RRGChart';
+import SectorScreener from '../components/SectorScreener';
 
 function Toggle({ options, value, onChange }) {
   return (
@@ -111,6 +112,8 @@ export default function SectorsTab() {
           rows={ratioRows}
         />
       </div>
+
+      <SectorScreener />
     </div>
   );
 }

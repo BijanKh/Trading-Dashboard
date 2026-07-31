@@ -26,6 +26,7 @@ import { getEcbCurve } from './ecb.js';
 import { getTrending, peekTrending, startTrendingScheduler } from './trending.js';
 import { getNews } from './news.js';
 import { getSpace } from './space.js';
+import { getSectorScreen, isSectorEtf } from './sectorscreen.js';
 import { getBacktest } from './backtest.js';
 import { evaluateAlerts } from './alerts.js';
 
@@ -276,6 +277,19 @@ app.get('/api/space', async (req, res) => {
   } catch (err) {
     console.error('Error in /api/space:', err);
     res.status(502).json({ error: 'Failed to load space screener.' });
+  }
+});
+
+app.get('/api/sector-screen', async (req, res) => {
+  try {
+    const etf = String(req.query.etf || '').toUpperCase().trim();
+    if (!isSectorEtf(etf)) {
+      return res.status(400).json({ error: `Unknown sector ETF: ${etf}` });
+    }
+    res.json(await getSectorScreen(etf));
+  } catch (err) {
+    console.error('Error in /api/sector-screen:', err);
+    res.status(502).json({ error: 'Failed to load sector screener.' });
   }
 });
 

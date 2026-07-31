@@ -32,7 +32,7 @@ export function localDateParts(date, timeZone) {
 }
 
 // Days since epoch of the Monday starting the ISO week containing y-m-d.
-function weekStartDays({ y, m, d }) {
+export function weekStartDays({ y, m, d }) {
   const epochDays = Math.floor(Date.UTC(y, m - 1, d) / 86400000);
   const dow = (epochDays + 4) % 7;        // 1970-01-01 was a Thursday
   const mondayOffset = (dow + 6) % 7;     // Mon=0 ... Sun=6
@@ -54,6 +54,8 @@ export function sameDate(a, b) {
 const SECTOR_SET = new Set(GROUPS.sectors.map(e => e.s));
 // Volatility symbols keep a full ~1y close series for percentile context.
 const VOL_SET = new Set(GROUPS.volatility.map(e => e.s));
+// Space symbols keep a 120-bar OHLC tail for the hover candle popover.
+const SPACE_SET = new Set(GROUPS.space.map(e => e.s));
 
 const dailyRefs = {
   bySymbol: new Map(),   // symbol -> { weekRef, sma20, sma50, sma200 }
@@ -120,6 +122,11 @@ async function fetchDailyRef(symbol) {
   };
   ref.series = completed.slice(-70).map(toPoint);
   if (VOL_SET.has(symbol)) ref.series1y = completed.slice(-260).map(toPoint);
+  if (SPACE_SET.has(symbol)) {
+    ref.ohlc = completed.slice(-120).map(b => [
+      b.open ?? b.close, b.high ?? b.close, b.low ?? b.close, b.close,
+    ].map(v => Number(v.toPrecision(5))));
+  }
 
   if (needsSma) {
     const closes = completed.map(b => b.close);
@@ -427,6 +434,9 @@ async function fetchAllQuotes() {
         out.high52 = r?.fiftyTwoWeekHigh ?? null;
         out.low52 = r?.fiftyTwoWeekLow ?? null;
         out.marketCap = r?.marketCap ?? null;
+        out.open = r?.regularMarketOpen ?? null;
+        out.dayHigh = r?.regularMarketDayHigh ?? null;
+        out.dayLow = r?.regularMarketDayLow ?? null;
       }
       return out;
     });
@@ -484,6 +494,11 @@ async function fetchAllQuotes() {
 // sessions, oldest first). Used by server/space.js for screener math.
 export function getCloseSeries(symbol) {
   return dailyRefs.bySymbol.get(symbol)?.series ?? null;
+}
+
+// 120-bar [o,h,l,c] tail (space symbols only) for the hover candle popover.
+export function getOhlcSeries(symbol) {
+  return dailyRefs.bySymbol.get(symbol)?.ohlc ?? null;
 }
 
 // ---------- cache with stampede guard + stale-on-error ----------

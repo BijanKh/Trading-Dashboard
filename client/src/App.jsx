@@ -11,7 +11,6 @@ import FXBondsTab from './tabs/FXBondsTab';
 import CommoditiesTab from './tabs/CommoditiesTab';
 import CryptoTab from './tabs/CryptoTab';
 import OptionsTab from './tabs/OptionsTab';
-import SpaceTab from './tabs/SpaceTab';
 import CreditTab from './tabs/CreditTab';
 import CalendarTab from './tabs/CalendarTab';
 
@@ -23,7 +22,6 @@ const TABS = [
   { id: 'commodities', label: 'Commodities', component: CommoditiesTab, intraday: true },
   { id: 'crypto', label: 'Crypto', component: CryptoTab, intraday: false },
   { id: 'options', label: 'Options', component: OptionsTab, intraday: false },
-  { id: 'space', label: 'Space', component: SpaceTab, intraday: false },
   { id: 'credit', label: 'Credit & Macro', component: CreditTab, intraday: false },
   { id: 'trending', label: 'Trending', component: TrendingTab, intraday: false },
 ];

@@ -108,6 +108,12 @@ export async function fetchSpace() {
   return res.json();
 }
 
+export async function fetchSectorScreen(etf) {
+  const res = await fetch(`${BASE}/api/sector-screen?etf=${encodeURIComponent(etf)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function fetchBacktest(strategy, refresh = false) {
   const res = await fetch(`${BASE}/api/backtest?strategy=${encodeURIComponent(strategy)}${refresh ? '&refresh=1' : ''}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
