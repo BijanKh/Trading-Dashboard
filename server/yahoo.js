@@ -54,7 +54,7 @@ export function sameDate(a, b) {
 const SECTOR_SET = new Set(GROUPS.sectors.map(e => e.s));
 // Volatility symbols keep a full ~1y close series for percentile context.
 const VOL_SET = new Set(GROUPS.volatility.map(e => e.s));
-// Space symbols keep a 120-bar OHLC tail for the hover candle popover.
+// Space + sector symbols keep a 120-bar OHLC tail for hover candle popovers.
 const SPACE_SET = new Set(GROUPS.space.map(e => e.s));
 
 const dailyRefs = {
@@ -122,7 +122,7 @@ async function fetchDailyRef(symbol) {
   };
   ref.series = completed.slice(-70).map(toPoint);
   if (VOL_SET.has(symbol)) ref.series1y = completed.slice(-260).map(toPoint);
-  if (SPACE_SET.has(symbol)) {
+  if (SPACE_SET.has(symbol) || SECTOR_SET.has(symbol)) {
     ref.ohlc = completed.slice(-120).map(b => [
       b.open ?? b.close, b.high ?? b.close, b.low ?? b.close, b.close,
     ].map(v => Number(v.toPrecision(5))));
@@ -425,6 +425,21 @@ async function fetchAllQuotes() {
         out.sma20 = q?.ref?.sma20 ?? null;
         out.sma50 = q?.ref?.sma50 ?? null;
         out.sma200 = q?.ref?.sma200 ?? null;
+        // Candle tail + live bar for the heatmap hover popover, same
+        // [o,h,l,c] format as the Trending/Space rows.
+        const ohlc = q?.ref?.ohlc;
+        if (ohlc && ohlc.length >= 15 && q?.price != null) {
+          const r = bySymbol.get(e.s);
+          const p = q.price;
+          const liveBar = [
+            r?.regularMarketOpen ?? p,
+            Math.max(r?.regularMarketDayHigh ?? p, p),
+            Math.min(r?.regularMarketDayLow ?? p, p),
+            p,
+          ].map(v => Number(v.toPrecision(5)));
+          out.spark = [...ohlc.slice(-119), liveBar];
+          out.sparkTf = 'day';
+        }
       }
       if (groupName === 'space') {
         const r = bySymbol.get(e.s);
@@ -437,6 +452,7 @@ async function fetchAllQuotes() {
         out.open = r?.regularMarketOpen ?? null;
         out.dayHigh = r?.regularMarketDayHigh ?? null;
         out.dayLow = r?.regularMarketDayLow ?? null;
+        out.forwardPE = r?.forwardPE ?? null;
       }
       return out;
     });
@@ -496,9 +512,44 @@ export function getCloseSeries(symbol) {
   return dailyRefs.bySymbol.get(symbol)?.series ?? null;
 }
 
-// 120-bar [o,h,l,c] tail (space symbols only) for the hover candle popover.
+// 120-bar [o,h,l,c] tail (space + sector symbols) for the hover candle popover.
 export function getOhlcSeries(symbol) {
   return dailyRefs.bySymbol.get(symbol)?.ohlc ?? null;
+}
+
+// ~30d ATM implied volatility for the screener IV column: one options()
+// listing call (nearest-expiry chain + expiration list), plus one more chain
+// fetch when the expiry closest to 30d isn't the nearest one. ATM IV = mean
+// implied vol of the 2 calls + 2 puts nearest the spot strike (same method as
+// optionsdash.js). Returns null when the symbol has no listed options
+// (foreign listings, some ETFs). Callers run this inside their serialized
+// 12h summary passes — never in an intraday path.
+export async function fetchAtmIV30(symbol) {
+  const listing = await withTimeout(yahooFinance.options(symbol, {}, { validateResult: false }),
+    15000, `options(${symbol})`);
+  const spot = listing?.quote?.regularMarketPrice;
+  const expirations = listing?.expirationDates || [];
+  if (!spot || !expirations.length) return null;
+
+  const target = Date.now() + 30 * 86400000;
+  const dist = (d) => Math.abs(new Date(d).getTime() - target);
+  const best = expirations.reduce((a, b) => dist(b) < dist(a) ? b : a);
+
+  let chain = listing?.options?.[0];
+  if (chain?.expirationDate != null
+      && new Date(chain.expirationDate).getTime() !== new Date(best).getTime()) {
+    const o = await withTimeout(yahooFinance.options(symbol, { date: best }, { validateResult: false }),
+      15000, `options(${symbol},30d)`);
+    chain = o?.options?.[0] ?? chain;
+  }
+  if (!chain) return null;
+
+  const near = (list) => (list || [])
+    .filter(c => c.impliedVolatility > 0.001)
+    .sort((a, b) => Math.abs(a.strike - spot) - Math.abs(b.strike - spot))
+    .slice(0, 2);
+  const ivs = [...near(chain.calls), ...near(chain.puts)].map(c => c.impliedVolatility);
+  return ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : null;
 }
 
 // ---------- cache with stampede guard + stale-on-error ----------

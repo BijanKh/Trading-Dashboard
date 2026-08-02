@@ -9,18 +9,37 @@ import { toTvSymbol } from '../lib/tv';
 import HoverChart from './HoverChart';
 
 // Shared screener UI for the Space tab and the per-sector Screener tab:
-// sortable table (default rank: short-the-bounce — AT EMA first, tightest to
-// the 12 EMA), hover candle popover, benchmark row pinned on top with a light
-// yellow tint. Row math comes from server/screener.js.
+// sortable table (default rank: AT EMA first — short bounces AND long
+// pullbacks — tightest to the 12 EMA), hover candle popover, benchmark row
+// pinned on top with a light yellow tint. Row math comes from
+// server/screener.js. AT EMA / TRENDING / EXTENDED exist on both sides:
+// orange + ▼ = short (below falling 50-DMA), green + ▲ = long (above rising
+// 50-DMA).
 
-export const SETUP_STYLE = {
-  'AT EMA': { color: '#F97316', weight: 700 },     // bounce reached the declining 12 EMA — action zone
-  BOUNCING: { color: colors.regime.ELEVATED, weight: 600 },
-  TRENDING: { color: colors.text.secondary, weight: 400 },
-  EXTENDED: { color: colors.text.muted, weight: 400 },
-  'EARLY DOWN': { color: colors.regime.ELEVATED, weight: 400 },
-  UPTREND: { color: colors.updown.up, weight: 400 },
-};
+export const SHORT_SETUP_COLOR = '#F97316';
+
+export function setupStyle(setup, side) {
+  const long = side === 'long';
+  switch (setup) {
+    case 'AT EMA': return { color: long ? colors.updown.up : SHORT_SETUP_COLOR, weight: 700 };
+    case 'BOUNCING': return { color: colors.regime.ELEVATED, weight: 600 };
+    case 'PULLBACK': return { color: colors.updown.up, weight: 600 };
+    case 'TRENDING': return { color: colors.text.secondary, weight: 400 };
+    case 'EXTENDED': return { color: colors.text.muted, weight: 400 };
+    case 'EARLY DOWN': return { color: colors.regime.ELEVATED, weight: 400 };
+    case 'EARLY UP': return { color: colors.updown.up, weight: 400 };
+    default: return { color: colors.text.secondary, weight: 400 };
+  }
+}
+
+// Side arrow for the tags that exist on both sides.
+function setupLabel(setup, side) {
+  if (!setup) return null;
+  if (['AT EMA', 'TRENDING', 'EXTENDED'].includes(setup)) {
+    return `${setup} ${side === 'long' ? '▲' : '▼'}`;
+  }
+  return setup;
+}
 
 const RANGE_STYLE = {
   'EXTREME OS': { color: colors.updown.up, weight: 700 },
@@ -59,7 +78,7 @@ function daysUntil(iso) {
   return d >= 0 ? d : null;
 }
 
-const SETUP_RANK = { 'AT EMA': 0, BOUNCING: 1, TRENDING: 2, EXTENDED: 3, 'EARLY DOWN': 4, UPTREND: 5 };
+const SETUP_RANK = { 'AT EMA': 0, BOUNCING: 1, PULLBACK: 1, TRENDING: 2, EXTENDED: 3, 'EARLY DOWN': 4, 'EARLY UP': 4 };
 
 const COLS = [
   { key: 'symbol', label: 'SYM', type: 'text' },
@@ -73,6 +92,8 @@ const COLS = [
   { key: 'rsi', label: 'RSI', type: 'num' },
   { key: 'dEmaVol', label: 'ΔEMA', type: 'num' },
   { key: 'pctB', label: 'OS ── OB', type: 'range' },
+  { key: 'iv', label: 'IV30', type: 'ivpct' },
+  { key: 'forwardPE', label: 'F P/E', type: 'fpe' },
   { key: 'shortPctFloat', label: 'SI %FLT', type: 'sipct' },
   { key: 'daysToCover', label: 'DTC', type: 'num' },
   { key: 'dollarVol', label: 'ADV $', type: 'big' },
@@ -108,10 +129,15 @@ export function CompositeStrip({ composite: c, title, tooltipKey }) {
         </div>
       )}
       <div style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text.muted, lineHeight: 1.7 }}>
-        <div>{c.belowFalling50}/{c.count} below a falling 50-DMA</div>
         <div>
-          <span style={{ color: SETUP_STYLE['AT EMA'].color, fontWeight: 700 }}>{c.atEma} at the 12 EMA</span>
-          {' · '}{c.bouncing} bouncing or at the EMA
+          SHORT {c.belowFalling50}/{c.count} below a falling 50-DMA ·{' '}
+          <span style={{ color: SHORT_SETUP_COLOR, fontWeight: 700 }}>{c.atEmaShort} at the 12 EMA</span>
+          {' · '}{c.bouncing} bouncing or at it
+        </div>
+        <div>
+          LONG {c.aboveRising50}/{c.count} above a rising 50-DMA ·{' '}
+          <span style={{ color: colors.updown.up, fontWeight: 700 }}>{c.atEmaLong} at the 12 EMA</span>
+          {' · '}{c.pullingBack} pulling back or at it
         </div>
       </div>
     </div>
@@ -211,7 +237,12 @@ export default function ScreenerTable({ rows: inputRows, title, benchmark }) {
                     </span>
                   );
                   else if (col.type === 'num') {
-                    const bounceZone = col.key === 'rsi' && v != null && v >= 45 && v <= 60 && r.setup !== 'UPTREND';
+                    // Mature counter-trend zone: RSI 45-60 on a short-side
+                    // bounce; mirrored 40-55 on a long-side pullback.
+                    const bounceZone = col.key === 'rsi' && v != null && (
+                      r.side === 'short' ? (v >= 45 && v <= 60) :
+                      r.side === 'long' ? (v >= 40 && v <= 55) : false
+                    );
                     content = v == null ? <span style={{ color: colors.text.muted }}>--</span> : (
                       <span style={{
                         color: bounceZone ? colors.regime.ELEVATED : colors.text.secondary,
@@ -221,6 +252,16 @@ export default function ScreenerTable({ rows: inputRows, title, benchmark }) {
                       </span>
                     );
                   }
+                  else if (col.type === 'ivpct') content = (
+                    <span style={{ color: colors.text.secondary }}>
+                      {v == null ? '--' : `${(v * 100).toFixed(0)}%`}
+                    </span>
+                  );
+                  else if (col.type === 'fpe') content = (
+                    <span style={{ color: colors.text.secondary }}>
+                      {v == null ? '--' : v.toFixed(1)}
+                    </span>
+                  );
                   else if (col.type === 'sipct') content = (
                     <span style={{ color: v != null && v > 0.15 ? colors.regime.ELEVATED : colors.text.secondary }}>
                       {v == null ? '--' : `${(v * 100).toFixed(0)}%`}
@@ -246,11 +287,14 @@ export default function ScreenerTable({ rows: inputRows, title, benchmark }) {
                         {earnDays}d
                       </span>
                     );
-                  else if (col.type === 'setup') content = (
-                    <span style={{ color: SETUP_STYLE[v]?.color ?? colors.text.secondary, fontWeight: SETUP_STYLE[v]?.weight ?? 400 }}>
-                      {isBench ? 'BENCHMARK' : v ?? '--'}
-                    </span>
-                  );
+                  else if (col.type === 'setup') {
+                    const st = setupStyle(v, r.side);
+                    content = (
+                      <span style={{ color: st.color, fontWeight: st.weight }}>
+                        {isBench ? 'BENCHMARK' : setupLabel(v, r.side) ?? '--'}
+                      </span>
+                    );
+                  }
                   else content = (
                     <div title={v ?? ''} style={{
                       color: col.key === 'symbol' ? colors.text.primary : colors.text.secondary,

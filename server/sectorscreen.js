@@ -1,6 +1,7 @@
 // Per-sector screener (GET /api/sector-screen?etf=XLK) — the Space tab
-// workflow applied to 16 sector/industry universes (top 30 members by market
-// cap + the ETF itself as benchmark row; lists in server/sectorUniverses.js).
+// workflow applied to 17 sector/industry universes (top 30 members by market
+// cap + the ETF itself as benchmark row; lists in server/sectorUniverses.js;
+// DRAM = full Roundhill Memory ETF equity holdings, incl. foreign primaries).
 //
 // Data is fully lazy and per-sector so the shared 45s intraday batch is
 // untouched:
@@ -20,7 +21,7 @@
 
 import { SECTOR_UNIVERSES } from './sectorUniverses.js';
 import {
-  yahooFinance, withTimeout, getCloseSeries,
+  yahooFinance, withTimeout, getCloseSeries, fetchAtmIV30,
   localDateParts, sameDate, weekStartDays,
 } from './yahoo.js';
 import { computeScreenRow, computeComposite } from './screener.js';
@@ -114,7 +115,9 @@ function ensureDaily(etf, symbols) {
     .finally(() => { st.inflight = false; });
 }
 
-// ---------- short interest + earnings (quoteSummary, 12h cache) ----------
+// ---------- short interest + earnings + IV30 (12h cache) ----------
+// quoteSummary per member, plus 1-2 options() calls per member for the ~30d
+// ATM IV column (null for names without listed options — foreign listings).
 
 function ensureSummaries(etf, symbols) {
   const st = store(etf).summary;
@@ -123,19 +126,24 @@ function ensureSummaries(etf, symbols) {
   summaryChain = summaryChain.then(async () => {
     let ok = 0;
     for (const s of symbols) {
+      const entry = {
+        shortPctFloat: null, daysToCover: null, earningsDate: null, iv: null,
+      };
       try {
         const r = await withTimeout(yahooFinance.quoteSummary(s, {
           modules: ['defaultKeyStatistics', 'calendarEvents'],
         }, { validateResult: false }), 15000, `quoteSummary(${s})`);
         const ks = r?.defaultKeyStatistics;
         const earnings = r?.calendarEvents?.earnings?.earningsDate?.[0] ?? null;
-        st.bySymbol.set(s, {
-          shortPctFloat: ks?.shortPercentOfFloat ?? null,
-          daysToCover: ks?.shortRatio ?? null,
-          earningsDate: earnings ? new Date(earnings).toISOString() : null,
-        });
+        entry.shortPctFloat = ks?.shortPercentOfFloat ?? null;
+        entry.daysToCover = ks?.shortRatio ?? null;
+        entry.earningsDate = earnings ? new Date(earnings).toISOString() : null;
         ok++;
       } catch {}
+      try {
+        entry.iv = await fetchAtmIV30(s);
+      } catch {}
+      st.bySymbol.set(s, entry);
       await new Promise(r => setTimeout(r, SUMMARY_GAP_MS));
     }
     st.fetchedAt = Date.now();
@@ -169,6 +177,7 @@ async function fetchSectorQuotes(etf, symbols) {
       sma50: r?.fiftyDayAverage ?? null,
       avgVolume: r?.averageDailyVolume3Month ?? null,
       marketCap: r?.marketCap ?? null,
+      forwardPE: r?.forwardPE ?? null,
       open: r?.regularMarketOpen ?? null,
       dayHigh: r?.regularMarketDayHigh ?? null,
       dayLow: r?.regularMarketDayLow ?? null,
@@ -213,7 +222,7 @@ export async function getSectorScreen(etf) {
   const symbols = [etf, ...u.members];
 
   ensureDaily(etf, symbols);
-  ensureSummaries(etf, u.members);
+  ensureSummaries(etf, symbols); // incl. the ETF itself, so the benchmark row gets IV
   const { asOf, quotes, spyPrice, stale } = await getSectorQuotes(etf, symbols);
 
   const st = store(etf);
@@ -229,6 +238,7 @@ export async function getSectorScreen(etf) {
     row.shortPctFloat = extra?.shortPctFloat ?? null;
     row.daysToCover = extra?.daysToCover ?? null;
     row.earningsDate = extra?.earningsDate ?? null;
+    row.iv = extra?.iv ?? null;
     if (q.symbol === etf) row.benchmark = true;
     return row;
   });

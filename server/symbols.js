@@ -189,6 +189,13 @@ export const GROUPS = {
     { s: 'VPG', label: 'Vishay Precision', dec: 2 },
     { s: 'KRMN', label: 'Karman', dec: 2 },
     { s: 'GILT', label: 'Gilat Satellite', dec: 2 },
+    { s: 'GRMN', label: 'Garmin', dec: 2 },
+    { s: 'TRMB', label: 'Trimble', dec: 2 },
+    { s: 'VSAT', label: 'Viasat', dec: 2 },
+    { s: 'SIRI', label: 'SiriusXM', dec: 2 },
+    { s: 'ECHO', label: 'EchoStar', dec: 2 },
+    { s: 'GSAT', label: 'Globalstar', dec: 2 },
+    { s: 'IRDM', label: 'Iridium', dec: 2 },
   ],
   // fetched only as ratio legs, not displayed as a group
   ratioLegs: [

@@ -1,4 +1,5 @@
-// Space-sector screener (GET /api/space) — short-the-bounce focus.
+// Space-sector screener (GET /api/space) — 12-EMA bounce (short) + pullback
+// (long) focus.
 //
 // Per symbol, computed from the shared 45s quote() batch + the ~70-session
 // close series of the daily refs pass (zero extra intraday API calls):
@@ -16,11 +17,15 @@
 //   rs21         21-session return minus SPY's (relative strength, pp)
 //   dollarVol    avg daily $ volume; thin = fails the user's short floors
 //                (price ≥ $5, ≥ $20M ADV)
-//   setup        short-side tag, only for names below a FALLING 50-DMA:
-//                AT EMA (bounce reached the declining 12 EMA — entry zone),
-//                BOUNCING (5d up, still below the EMA), EXTENDED (≤ −2 vol
-//                units below the EMA — late to chase), TRENDING (drifting
-//                lower near the EMA), UPTREND for everything else.
+//   setup/side   mirrored long/short tags, identical thresholds both ways.
+//                Short side (side='short', below a FALLING 50-DMA): AT EMA
+//                (bounce reached the declining 12 EMA — entry zone), BOUNCING
+//                (5d up, still below the EMA), EXTENDED (≤ −2 vol units below
+//                — late to chase), TRENDING, EARLY DOWN (below a still-rising
+//                50-DMA). Long side (side='long', above a RISING 50-DMA):
+//                AT EMA (pullback reached the rising 12 EMA), PULLBACK (5d
+//                down, still above the EMA), EXTENDED (≥ +2 vol units above),
+//                TRENDING, EARLY UP (above a still-falling 50-DMA).
 //
 // The row/composite math lives in server/screener.js, shared with the
 // per-sector Screener tab (server/sectorscreen.js).
@@ -29,7 +34,7 @@
 // sequential quoteSummary pass cached 12h (same pattern as earnings.js).
 
 import { GROUPS } from './symbols.js';
-import { yahooFinance, withTimeout, getCloseSeries, getOhlcSeries, getQuotes } from './yahoo.js';
+import { yahooFinance, withTimeout, getCloseSeries, getOhlcSeries, getQuotes, fetchAtmIV30 } from './yahoo.js';
 import { computeScreenRow, computeComposite } from './screener.js';
 
 const SUMMARY_TTL_MS = 12 * 60 * 60 * 1000;
@@ -45,19 +50,24 @@ async function refreshSummaries(symbols) {
   try {
     let ok = 0;
     for (const s of symbols) {
+      const entry = {
+        shortPctFloat: null, daysToCover: null, earningsDate: null, iv: null,
+      };
       try {
         const r = await withTimeout(yahooFinance.quoteSummary(s, {
           modules: ['defaultKeyStatistics', 'calendarEvents'],
         }, { validateResult: false }), 15000, `quoteSummary(${s})`);
         const ks = r?.defaultKeyStatistics;
         const earnings = r?.calendarEvents?.earnings?.earningsDate?.[0] ?? null;
-        summaryCache.bySymbol.set(s, {
-          shortPctFloat: ks?.shortPercentOfFloat ?? null,
-          daysToCover: ks?.shortRatio ?? null,
-          earningsDate: earnings ? new Date(earnings).toISOString() : null,
-        });
+        entry.shortPctFloat = ks?.shortPercentOfFloat ?? null;
+        entry.daysToCover = ks?.shortRatio ?? null;
+        entry.earningsDate = earnings ? new Date(earnings).toISOString() : null;
         ok++;
       } catch {}
+      try {
+        entry.iv = await fetchAtmIV30(s);
+      } catch {}
+      summaryCache.bySymbol.set(s, entry);
       await new Promise(r => setTimeout(r, SUMMARY_GAP_MS));
     }
     summaryCache.fetchedAt = Date.now();
@@ -90,6 +100,7 @@ export async function getSpace() {
     row.shortPctFloat = extra?.shortPctFloat ?? null;
     row.daysToCover = extra?.daysToCover ?? null;
     row.earningsDate = extra?.earningsDate ?? null;
+    row.iv = extra?.iv ?? null;
     return row;
   });
 

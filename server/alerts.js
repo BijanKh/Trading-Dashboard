@@ -79,13 +79,17 @@ export function evaluateAlerts({ quotes, tape, credit, creditIndicators, diverge
       `SPY near its 20d high while S&P >50d breadth fell from ${Math.round(divergence.breadth5dAgo * 100)}% to ${Math.round(divergence.breadthNow * 100)}%.`);
   }
 
-  // Space screener: a name's bounce reached the declining 12 EMA — the
-  // short-entry trigger the tab is built around. Per-symbol per-day ids.
+  // Space screener: a name reached the 12 EMA — bounce into a falling
+  // 50-DMA (short entry) or pullback above a rising 50-DMA (long entry).
+  // Per-symbol per-day ids (a symbol is only ever on one side per day).
   const dayET = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
   for (const r of space?.rows || []) {
     if (r.setup === 'AT EMA' && !r.thin) {
-      add(`space_atema_${r.symbol}_${dayET}`, 'info', `${r.symbol} AT EMA`,
-        `Space short setup: bounce reached the declining 12 EMA (ΔEMA ${r.dEmaVol?.toFixed(1)}, RSI ${r.rsi?.toFixed(0)}).`);
+      const detail = r.side === 'long'
+        ? `Space long setup: pullback reached the 12 EMA above a rising 50-DMA (ΔEMA ${r.dEmaVol?.toFixed(1)}, RSI ${r.rsi?.toFixed(0)}).`
+        : `Space short setup: bounce reached the declining 12 EMA (ΔEMA ${r.dEmaVol?.toFixed(1)}, RSI ${r.rsi?.toFixed(0)}).`;
+      add(`space_atema_${r.symbol}_${dayET}`, 'info',
+        `${r.symbol} AT EMA (${r.side === 'long' ? 'long' : 'short'})`, detail);
     }
   }
 

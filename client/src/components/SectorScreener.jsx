@@ -2,22 +2,23 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { fetchSectorScreen, fetchSpace } from '../lib/api';
 import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
-import ScreenerTable, { CompositeStrip, SETUP_STYLE } from './ScreenerTable';
+import ScreenerTable, { CompositeStrip, SHORT_SETUP_COLOR } from './ScreenerTable';
 import BacktestPanel from './BacktestPanel';
 
 // Per-sector screener block, embedded at the bottom of the Sectors tab — the
-// short-the-bounce workflow over 16 sector/industry universes (top 30 by
-// market cap + the ETF as benchmark row, lists in server/sectorUniverses.js)
-// plus the Space watchlist as a 17th chip (server/space.js, UFO benchmark,
-// AT-EMA backtest panel included).
+// bounce/pullback workflow (shorts + longs) over 17 sector universes (top 30 by
+// market cap + the ETF as benchmark row, lists in server/sectorUniverses.js;
+// DRAM = full memory-ETF holdings incl. foreign primaries) plus the Space
+// watchlist as an 18th chip (server/space.js, UFO benchmark, AT-EMA backtest
+// panel included).
 
 const ETFS = [
-  ['XLK', 'Technology'], ['XLF', 'Financials'], ['XLV', 'Health Care'],
-  ['XLY', 'Discretionary'], ['XLP', 'Staples'], ['XLE', 'Energy'],
-  ['XLI', 'Industrials'], ['XLB', 'Materials'], ['XLC', 'Communications'],
-  ['XLRE', 'Real Estate'], ['SMH', 'Semis'], ['XBI', 'Biotech'],
-  ['XRT', 'Retail'], ['XHB', 'Homebuilders'], ['IYT', 'Transports'],
-  ['IGV', 'Software'], ['SPACE', 'Space'],
+  ['XLK', 'Technology'], ['SMH', 'Semis'], ['DRAM', 'Memory'], ['IGV', 'Software'],
+  ['XLF', 'Financials'], ['XLV', 'Health Care'], ['XLY', 'Discretionary'],
+  ['XLP', 'Staples'], ['XLE', 'Energy'], ['XLI', 'Industrials'],
+  ['XLB', 'Materials'], ['XLC', 'Communications'], ['XLRE', 'Real Estate'],
+  ['XBI', 'Biotech'], ['XRT', 'Retail'], ['XHB', 'Homebuilders'],
+  ['IYT', 'Transports'], ['SPACE', 'Space'],
 ];
 
 function initialEtf() {
@@ -61,7 +62,7 @@ export default function SectorScreener() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: colors.text.secondary, fontFamily: fonts.sans, marginTop: 8 }}>
-        SECTOR SCREENER — top 30 by market cap per universe, short-the-bounce workflow
+        SECTOR SCREENER — top 30 by market cap per universe, 12-EMA bounce (short) + pullback (long) workflow
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {ETFS.map(([e, label]) => {
@@ -118,7 +119,7 @@ export default function SectorScreener() {
           <ScreenerTable
             rows={showing.rows}
             benchmark={benchmark}
-            title={`${isSpace ? 'SPACE STOCKS' : `${showing.etf} — ${showing.label.toUpperCase()}`} — ${showing.stale ? 'STALE' : 'LIVE'} · default rank: short-the-bounce (AT EMA first, tightest to the 12 EMA)`}
+            title={`${isSpace ? 'SPACE STOCKS' : `${showing.etf} — ${showing.label.toUpperCase()}`} — ${showing.stale ? 'STALE' : 'LIVE'} · default rank: AT EMA first (shorts ▼ + longs ▲), tightest to the 12 EMA`}
           />
           {isSpace && (
             <BacktestPanel
@@ -135,14 +136,18 @@ export default function SectorScreener() {
         5D / 30D = 5- / 30-session change · vs 50DMA = distance to the 50-day average · ΔEMA = distance to the 12 EMA
         in units of 20-day close-to-close volatility (ATR proxy: 0 = at the EMA, negative = below) ·
         OS──OB = Bollinger(20,2) %B position, dot in the green zone = oversold, red = overbought ·
+        IV30 = ~30d ATM implied vol from the option chain nearest 30 days ("--" = no listed options, e.g. foreign
+        listings; refreshed 12h) · F P/E = forward price/earnings from Yahoo estimates ·
         SI %FLT = short interest as % of float (amber &gt;15% — squeeze fuel), DTC = days to cover ·
         EARN = days to next earnings (amber ≤7d — binary-event risk for shorts) · ADV $ = avg daily dollar
         volume, "thin" = fails the short liquidity floors (price ≥$5, ≥$20M ADV).
-        SETUP (names below a falling 50-DMA only): BOUNCING = 5d up, still under the 12 EMA →
-        <span style={{ color: SETUP_STYLE['AT EMA'].color, fontWeight: 700 }}> AT EMA</span> = bounce reached the
-        declining 12 EMA (the classic short-entry zone) · EXTENDED = ≥2 vol-units below the EMA (late to chase,
-        wait for the bounce) · EARLY DOWN = below a still-RISING 50-DMA (fresh breakdown after a run-up, downtrend
-        not confirmed) · UPTREND = above the 50-DMA, no short setup. Quotes tick every 45s while visible; daily
+        SETUP is mirrored long/short with identical thresholds. SHORT side (▼, below a FALLING 50-DMA): BOUNCING =
+        5d up, still under the 12 EMA → <span style={{ color: SHORT_SETUP_COLOR, fontWeight: 700 }}>AT EMA ▼</span> =
+        bounce reached the declining 12 EMA (short-entry zone) · EXTENDED ▼ = ≥2 vol-units below (late to chase) ·
+        EARLY DOWN = below a still-RISING 50-DMA (breakdown not confirmed). LONG side (▲, above a RISING 50-DMA):
+        PULLBACK = 5d down, still over the 12 EMA → <span style={{ color: colors.updown.up, fontWeight: 700 }}>AT
+        EMA ▲</span> = pullback reached the rising 12 EMA (long-entry zone) · EXTENDED ▲ = ≥2 vol-units above (late
+        to chase) · EARLY UP = above a still-FALLING 50-DMA (breakout not confirmed). Quotes tick every 45s while visible; daily
         history per sector loads on first visit (6h refresh); short interest/earnings every 12h.
       </div>
     </div>

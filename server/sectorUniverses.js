@@ -93,6 +93,27 @@ export const SECTOR_UNIVERSES = {
       'ALAB', 'STM', 'MCHP', 'ON', 'SWKS',
     ],
   },
+  // Roundhill Memory ETF: full equity holdings (DRAM/NAND/HBM pure plays, only
+  // ~12 names), deduped across swap/ADR lines to one row per company (primary
+  // listings — Yahoo carries full daily history for all of them). Ranked by
+  // USD-converted market cap on 2026-08-02.
+  DRAM: {
+    label: 'Memory',
+    members: [
+      '005930.KS',  // Samsung Electronics (KRX)
+      'MU',         // Micron
+      '000660.KS',  // SK hynix (KRX; SKHY US line skipped as duplicate)
+      'STX',        // Seagate
+      'WDC',        // Western Digital
+      'SNDK',       // Sandisk
+      '285A.T',     // Kioxia (Tokyo)
+      '603986.SS',  // GigaDevice (Shanghai)
+      '2408.TW',    // Nanya Technology (Taiwan)
+      '2344.TW',    // Winbond (Taiwan)
+      '8299.TWO',   // Phison (Taipei Exchange)
+      '2337.TW',    // Macronix (Taiwan)
+    ],
+  },
   XBI: {
     label: 'Biotech',
     members: [

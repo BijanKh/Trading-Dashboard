@@ -4,8 +4,8 @@
 // against the main dashboard's daily-refs store (space) or the sector
 // screener's own lazy store.
 //
-// Row fields and the short-the-bounce SETUP tagging are documented in
-// server/space.js.
+// Row fields and the SETUP tagging (mirrored short-the-bounce / buy-the-
+// pullback) are documented in server/space.js.
 
 export function emaLast(values, period) {
   if (values.length < period) return null;
@@ -70,9 +70,10 @@ export function computeScreenRow(q, spyR21, series, ohlc) {
     wtdPct: q.wtdPct,
     ytdPct: q.ytdPct,
     marketCap: q.marketCap ?? null,
+    forwardPE: q.forwardPE ?? null,
     r5: null, r30: null, vs50: null, sma50Falling: null, rsi: null, pctB: null,
     range: null, dEmaVol: null, rs21: null, dollarVol: null, thin: null,
-    setup: null,
+    setup: null, side: null,
   };
   if (price == null) return out;
 
@@ -127,18 +128,33 @@ export function computeScreenRow(q, spyR21, series, ohlc) {
     out.rs21 = (r21 - spyR21) * 100; // percentage points vs SPY
   }
 
-  // Downtrend = below the 50-DMA unless the 50-DMA is actually rising.
-  // (Slope can be unknown for recent IPOs with a short close series.)
-  // Below a RISING 50-DMA = fresh breakdown after a run-up — not yet a
-  // confirmed downtrend, tagged EARLY DOWN.
-  const trendDown = out.vs50 != null && out.vs50 < 0 && out.sma50Falling !== false;
+  // Mirrored setup tagging. Short side: downtrend = below the 50-DMA unless
+  // the 50-DMA is actually rising (below a RISING 50-DMA = fresh breakdown
+  // after a run-up, tagged EARLY DOWN). Long side is the exact mirror:
+  // uptrend = above the 50-DMA unless the 50-DMA is actually falling (above
+  // a FALLING 50-DMA = fresh breakout after a decline, tagged EARLY UP).
+  // Same thresholds both ways: |ΔEMA| ≤ 0.75 = AT EMA (entry zone), ±2 vol
+  // units past the EMA = EXTENDED, 5d counter-trend move toward the EMA =
+  // BOUNCING (short) / PULLBACK (long). (50-DMA slope can be unknown for
+  // recent IPOs with a short close series.)
   if (out.vs50 == null) out.setup = null;
-  else if (out.vs50 >= 0) out.setup = 'UPTREND';
-  else if (!trendDown) out.setup = 'EARLY DOWN';
-  else if (out.dEmaVol != null && Math.abs(out.dEmaVol) <= 0.75) out.setup = 'AT EMA';
-  else if (out.dEmaVol != null && out.dEmaVol <= -2) out.setup = 'EXTENDED';
-  else if (out.r5 != null && out.r5 > 0) out.setup = 'BOUNCING';
-  else out.setup = 'TRENDING';
+  else if (out.vs50 < 0) {
+    out.side = 'short';
+    const trendDown = out.sma50Falling !== false;
+    if (!trendDown) out.setup = 'EARLY DOWN';
+    else if (out.dEmaVol != null && Math.abs(out.dEmaVol) <= 0.75) out.setup = 'AT EMA';
+    else if (out.dEmaVol != null && out.dEmaVol <= -2) out.setup = 'EXTENDED';
+    else if (out.r5 != null && out.r5 > 0) out.setup = 'BOUNCING';
+    else out.setup = 'TRENDING';
+  } else {
+    out.side = 'long';
+    const trendUp = out.sma50Falling !== true;
+    if (!trendUp) out.setup = 'EARLY UP';
+    else if (out.dEmaVol != null && Math.abs(out.dEmaVol) <= 0.75) out.setup = 'AT EMA';
+    else if (out.dEmaVol != null && out.dEmaVol >= 2) out.setup = 'EXTENDED';
+    else if (out.r5 != null && out.r5 < 0) out.setup = 'PULLBACK';
+    else out.setup = 'TRENDING';
+  }
   return out;
 }
 
@@ -177,9 +193,12 @@ export function computeComposite(rows, seriesFor, exclude = new Set()) {
     dayPct: avg(live.map(r => r.dayPct)),
     r5: avg(live.map(r => r.r5)),
     ytdPct: avg(live.map(r => r.ytdPct)),
-    belowFalling50: live.filter(r => ['AT EMA', 'BOUNCING', 'TRENDING', 'EXTENDED'].includes(r.setup)).length,
-    bouncing: live.filter(r => r.setup === 'BOUNCING' || r.setup === 'AT EMA').length,
-    atEma: live.filter(r => r.setup === 'AT EMA').length,
+    belowFalling50: live.filter(r => r.side === 'short' && ['AT EMA', 'BOUNCING', 'TRENDING', 'EXTENDED'].includes(r.setup)).length,
+    aboveRising50: live.filter(r => r.side === 'long' && ['AT EMA', 'PULLBACK', 'TRENDING', 'EXTENDED'].includes(r.setup)).length,
+    bouncing: live.filter(r => r.side === 'short' && (r.setup === 'BOUNCING' || r.setup === 'AT EMA')).length,
+    pullingBack: live.filter(r => r.side === 'long' && (r.setup === 'PULLBACK' || r.setup === 'AT EMA')).length,
+    atEmaShort: live.filter(r => r.side === 'short' && r.setup === 'AT EMA').length,
+    atEmaLong: live.filter(r => r.side === 'long' && r.setup === 'AT EMA').length,
     index,
   };
 }
