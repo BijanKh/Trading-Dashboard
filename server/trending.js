@@ -20,14 +20,32 @@
 // so they show active trends, not bounces. Weakest also applies the short
 // tradability floors.
 //
+// "Setups Equilibriums Daily/Weekly": sideways-range screens over the whole
+// universe. Rule (user-approved 2026-08-25, tightened same day — he wants
+// MAXIMUM squeezed BBs held for a long time): Bollinger(20,2) width
+// ((upper-lower)/middle) today at or below the 10th percentile of the
+// stock's own ~1-year width history AND inside the squeeze (<= 15th
+// percentile) for >= 15 consecutive daily bars / 8 weekly bars AND a hard
+// flatness cap on the total 20-bar high-low range (12% daily / 25% weekly)
+// so tight flags inside steep trends don't qualify — only genuine, mature
+// horizontal boxes. Weekly bars are resampled from the daily bars (no
+// extra API calls). Both lists apply the $5 price / $20M ADV tradability
+// floors (breakouts go either way) and rank by the AVERAGE width
+// percentile over the persistence window — deepest sustained squeeze
+// first. Strict by design: lists may hold fewer than 10 names.
+//
 // Cost model: one batched quote() pass over ~560 symbols (4 chunks)
 // supplies price / 52-week range / liquidity, and pre-filters the setup
 // candidate pool (within X% of the ATH implies within X% of the 52w high).
-// The sequential chart() pass (350ms gaps) then fetches ~420d of daily
-// bars for EVERY symbol (EMA/ATR/returns — the momentum list needs the
-// whole universe) plus full-listing weekly bars for pool candidates only
-// (ATH + weekly EMA/ATR). ~770 calls, ~7 min, once a day: lazily when a
-// request finds the scan > 20h old, and via cron after the US close.
+// The sequential chart() pass (250ms gaps) then fetches ~800d of daily
+// bars for EVERY symbol (EMA/ATR/returns + equilibrium width history — the
+// momentum and equilibrium lists need the whole universe). Full-listing
+// weekly bars (ATH + weekly EMA/ATR) come from the per-symbol disk cache
+// (data/weeklycache.json, ~7d TTL staggered per symbol, recent weeks
+// spliced in from the daily bars) and are refetched only on cache misses —
+// so a steady-state scan is ~520 calls / ~3-4 min instead of ~770 / ~7 min.
+// Runs once a day: lazily when a request finds the scan > 20h old, and via
+// cron after the US close.
 // Result persists to data/trending.json so restarts don't rescan.
 
 import fs from 'fs';
@@ -40,6 +58,7 @@ import { getSp500Symbols } from './sp500.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DISK_CACHE = path.join(__dirname, '..', 'data', 'trending.json');
 const NDX_DISK_CACHE = path.join(__dirname, '..', 'data', 'ndx100.json');
+const WEEKLY_DISK_CACHE = path.join(__dirname, '..', 'data', 'weeklycache.json');
 
 const NDX_URL = 'https://en.wikipedia.org/wiki/Nasdaq-100';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -48,7 +67,9 @@ const SCAN_TTL_MS = 20 * 60 * 60 * 1000;
 const FORCE_MIN_GAP_MS = 10 * 60 * 1000;
 const NDX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const QUOTE_CHUNK = 150;
-const CHART_GAP_MS = 350;
+const CHART_GAP_MS = 250;
+const WEEKLY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // full weekly-history refetch cadence
+const WEEKLY_PRUNE_MS = 30 * 24 * 60 * 60 * 1000;
 const LONG_POOL_MAX = 200;
 const SHORT_POOL_MAX = 150;
 
@@ -60,6 +81,19 @@ const MIN_DOLLAR_VOL_SHORT = 20e6;
 const PULLBACK_ATR = 1.0;
 const EXTENDED_ATR = 2.5;
 const TOP_N = 10;
+
+// Equilibrium (sideways range) screens
+const EQ_WIDTH_PCTILE_NOW = 10; // today's width at/below this percentile of own history
+const EQ_SQUEEZE_PCTILE = 15;   // squeeze-membership threshold for the persistence window
+const EQ_PERSIST_DAY = 15;      // consecutive daily bars required inside the squeeze
+const EQ_PERSIST_WEEK = 8;      // consecutive weekly bars required inside the squeeze
+const EQ_SQZ_COUNT_CAP = 60;    // display cap when counting squeeze duration
+const EQ_RANGE_DAY = 0.12;     // total 20-bar high-low range cap, daily
+const EQ_RANGE_WEEK = 0.25;    // total 20-bar high-low range cap, weekly
+const EQ_LOOKBACK_DAY = 252;   // width-percentile lookback, daily bars
+const EQ_LOOKBACK_WEEK = 52;   // width-percentile lookback, weekly bars
+const EQ_MIN_HISTORY_DAY = 120;  // minimum width samples before percentile is meaningful
+const EQ_MIN_HISTORY_WEEK = 30;
 
 // ---------- Nasdaq-100 constituents (Wikipedia, 7d cache + disk fallback) ----------
 
@@ -165,10 +199,13 @@ function sessionClosed(meta) {
   return Date.now() >= t;
 }
 
-// ~420 calendar days of daily bars: EMA12/ATR14 daily + 1/3/6-month returns
+// ~800 calendar days of daily bars: EMA12/ATR14 daily + 1/3/6-month returns,
+// plus enough history for the equilibrium screens (1y of daily BB-width
+// samples needs ~290 trading days; the weekly resample needs ~110 weeks for
+// its BB(20) + percentile history). Same one call per symbol, just more bars.
 async function fetchDailyBars(symbol) {
   const result = await withTimeout(yahooFinance.chart(symbol, {
-    period1: new Date(Date.now() - 420 * 86400000),
+    period1: new Date(Date.now() - 800 * 86400000),
     interval: '1d',
   }, { validateResult: false }), 15000, `chart(${symbol})`);
 
@@ -228,19 +265,219 @@ function enrichDaily(c, daily) {
   c.sparkD = sparkTail(daily);
 }
 
-function enrichWeekly(c, weekly) {
+function enrichWeekly(c, weekly, athOverride = null) {
   const closes = weekly.map(b => b.close);
   c.ema12w = ema(closes, 12);
   c.sparkW = sparkTail(weekly);
   c.atr14w = atr(weekly.slice(-120), 14); // recent regime, not 1990s vol
 
-  let ath = null;
-  for (const b of weekly) {
-    const h = b.high ?? b.close;
-    if (h > 0 && (ath == null || h > ath)) ath = h;
+  let ath = athOverride;
+  if (ath == null) {
+    for (const b of weekly) {
+      const h = b.high ?? b.close;
+      if (h > 0 && (ath == null || h > ath)) ath = h;
+    }
   }
   c.ath = ath;
   c.offAth = ath ? c.price / ath - 1 : null;
+}
+
+// ---------- weekly-history disk cache ----------
+// A stock's full listing history barely changes day to day: the only things
+// the full weekly fetch provides beyond the ~110 weeks resampled from the
+// daily bars are the true ATH (one number) and deeper EMA-seed/spark bars.
+// So cache { ath, last 200 weekly bars } per symbol and refetch a symbol's
+// full history only every ~7 days (staggered per symbol so the refetches
+// don't all land on the same scan). Cache hits cost zero API calls: the
+// cached prefix is spliced with the daily-resampled recent weeks and the
+// ATH is bumped by any new highs. Cuts ~250 calls/scan (~35%).
+
+let weeklyCache = {};
+try { weeklyCache = JSON.parse(fs.readFileSync(WEEKLY_DISK_CACHE, 'utf8')) || {}; } catch {}
+let weeklyCacheDirty = false;
+
+// Deterministic 0-48h per-symbol offset on the 7d TTL
+function symJitterMs(symbol) {
+  let h = 0;
+  for (const ch of symbol) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return (h % 48) * 3600000;
+}
+
+// Weekly bars + ATH for one candidate; fetched=true when a network call was
+// made (the caller then applies the inter-call gap).
+async function weeklyBarsFor(c, resampled) {
+  const cached = weeklyCache[c.symbol];
+  if (cached && Date.now() - cached.fetchedAt < WEEKLY_TTL_MS + symJitterMs(c.symbol)
+      && resampled.length && Array.isArray(cached.bars)) {
+    cached.usedAt = Date.now();
+    weeklyCacheDirty = true;
+    const firstWeek = resampled[0].week;
+    const prefix = cached.bars
+      .filter(b => b[0] < firstWeek)
+      .map(b => ({ week: b[0], date: new Date(b[0] * 86400000), open: b[1], high: b[2], low: b[3], close: b[4] }));
+    let ath = cached.ath;
+    for (const b of resampled) {
+      if (b.high > 0 && (ath == null || b.high > ath)) ath = b.high;
+    }
+    return { bars: [...prefix, ...resampled], ath, fetched: false };
+  }
+
+  const wk = await fetchWeeklyHistory(c.symbol);
+  let ath = null;
+  for (const b of wk) {
+    const h = b.high ?? b.close;
+    if (h > 0 && (ath == null || h > ath)) ath = h;
+  }
+  weeklyCache[c.symbol] = {
+    fetchedAt: Date.now(),
+    usedAt: Date.now(),
+    ath,
+    bars: wk.slice(-200).map(b => [
+      isoWeekStartDays(b.date, NY_TZ),
+      ...[b.open, b.high, b.low, b.close].map(v => Number((v != null && isFinite(v) ? v : b.close).toPrecision(5))),
+    ]),
+  };
+  weeklyCacheDirty = true;
+  return { bars: wk, ath, fetched: true };
+}
+
+function persistWeeklyCache() {
+  if (!weeklyCacheDirty) return;
+  const cutoff = Date.now() - WEEKLY_PRUNE_MS;
+  for (const [sym, e] of Object.entries(weeklyCache)) {
+    if ((e.usedAt || e.fetchedAt || 0) < cutoff) delete weeklyCache[sym];
+  }
+  try {
+    fs.writeFileSync(WEEKLY_DISK_CACHE, JSON.stringify(weeklyCache));
+    weeklyCacheDirty = false;
+  } catch (err) {
+    console.error('weekly cache persist failed:', err.message);
+  }
+}
+
+// ---------- equilibrium (sideways range) detection ----------
+
+// Bollinger(20,2) relative width per bar: (upper - lower) / middle = 2k·σ/μ.
+// Returns one width per bar from index n-1 on.
+function bbWidthSeries(closes, n = 20, k = 2) {
+  const out = [];
+  for (let i = n - 1; i < closes.length; i++) {
+    let sum = 0;
+    for (let j = i - n + 1; j <= i; j++) sum += closes[j];
+    const mean = sum / n;
+    if (!(mean > 0)) continue;
+    let varSum = 0;
+    for (let j = i - n + 1; j <= i; j++) varSum += (closes[j] - mean) ** 2;
+    out.push((2 * k * Math.sqrt(varSum / n)) / mean);
+  }
+  return out;
+}
+
+const NY_TZ = 'America/New_York';
+
+// Weekly OHLC resampled from the (completed-sessions-only) daily bars, so
+// the equilibrium weekly screen needs no extra API calls. The still-forming
+// current week is dropped unless its last session was a Friday (in which
+// case the week is complete — daily bars never contain a live session).
+function resampleWeekly(daily) {
+  const out = [];
+  for (const b of daily) {
+    const wk = isoWeekStartDays(b.date, NY_TZ);
+    const cur = out[out.length - 1];
+    if (cur && cur.week === wk) {
+      cur.high = Math.max(cur.high, b.high ?? b.close);
+      cur.low = Math.min(cur.low, b.low ?? b.close);
+      cur.close = b.close;
+      cur.lastDate = b.date;
+    } else {
+      out.push({
+        week: wk,
+        date: b.date,
+        lastDate: b.date,
+        open: b.open ?? b.close,
+        high: b.high ?? b.close,
+        low: b.low ?? b.close,
+        close: b.close,
+      });
+    }
+  }
+  if (out.length) {
+    const last = out[out.length - 1];
+    if (last.week >= isoWeekStartDays(new Date(), NY_TZ)) {
+      const { y, m, d } = localDateParts(last.lastDate, NY_TZ);
+      const dow = (Math.floor(Date.UTC(y, m - 1, d) / 86400000) + 4) % 7; // 0=Sun..6=Sat
+      if (dow !== 5) out.pop();
+    }
+  }
+  return out;
+}
+
+// Width percentile of bar i vs the trailing lookback window ending at i
+// (window includes the bar itself, so the floor is 100/window-length).
+function widthPctileAt(widths, i, lookback) {
+  const start = Math.max(0, i - lookback + 1);
+  let cnt = 0;
+  for (let j = start; j <= i; j++) if (widths[j] <= widths[i]) cnt++;
+  return (cnt / (i - start + 1)) * 100;
+}
+
+// The equilibrium rule (see header): today's width <= 10th percentile,
+// inside the squeeze (<= 15th) for the whole persistence window, hard
+// flatness cap, tradability floors. Returns a ranked-list row or null.
+function equilibrium(c, bars, tf) {
+  if (c.price < MIN_PRICE_SHORT || (c.dollarVol ?? 0) < MIN_DOLLAR_VOL_SHORT) return null;
+  const day = tf === 'day';
+  const widths = bbWidthSeries(bars.map(b => b.close));
+  if (widths.length < (day ? EQ_MIN_HISTORY_DAY : EQ_MIN_HISTORY_WEEK)) return null;
+  const lookback = day ? EQ_LOOKBACK_DAY : EQ_LOOKBACK_WEEK;
+  const persist = day ? EQ_PERSIST_DAY : EQ_PERSIST_WEEK;
+  const last = widths.length - 1;
+  const w = widths[last];
+
+  const widthPctile = widthPctileAt(widths, last, lookback);
+  if (widthPctile > EQ_WIDTH_PCTILE_NOW) return null;
+
+  // Persistence: every bar of the window inside the squeeze; the average
+  // depth over the window is the ranking (deepest sustained squeeze first)
+  let sum = widthPctile;
+  for (let k = 1; k < persist; k++) {
+    const p = widthPctileAt(widths, last - k, lookback);
+    if (p > EQ_SQUEEZE_PCTILE) return null;
+    sum += p;
+  }
+  const avgPctile = sum / persist;
+
+  // Squeeze duration for display: consecutive bars inside the squeeze
+  let sqzBars = 0;
+  while (sqzBars < Math.min(last + 1, EQ_SQZ_COUNT_CAP)
+      && widthPctileAt(widths, last - sqzBars, lookback) <= EQ_SQUEEZE_PCTILE) {
+    sqzBars++;
+  }
+
+  let hi = -Infinity, lo = Infinity;
+  for (const b of bars.slice(-20)) {
+    hi = Math.max(hi, b.high ?? b.close);
+    lo = Math.min(lo, b.low ?? b.close);
+  }
+  const lastClose = bars[bars.length - 1].close;
+  const rangePct = lastClose > 0 ? (hi - lo) / lastClose : null;
+  if (rangePct == null || rangePct > (day ? EQ_RANGE_DAY : EQ_RANGE_WEEK)) return null;
+
+  return {
+    symbol: c.symbol,
+    name: c.name,
+    price: c.price,
+    dayPct: c.dayPct,
+    widthPctile,
+    avgPctile,
+    sqzBars,
+    bbWidth: w,
+    rangePct,
+    rangePos: hi > lo ? (c.price - lo) / (hi - lo) : null, // where the live price sits in the box
+    rs: c.rs ?? null,
+    spark: sparkTail(bars),
+    sparkTf: day ? 'day' : 'week',
+  };
 }
 
 // RS vs SPY: weighted 1/3/6-month excess returns, reweighted if history is
@@ -388,12 +625,17 @@ async function scan() {
   for (const c of infos) {
     const isCandidate = candidateSet.has(c.symbol);
     try {
-      enrichDaily(c, await fetchDailyBars(c.symbol));
+      const dailyBars = await fetchDailyBars(c.symbol);
+      const resampled = resampleWeekly(dailyBars);
+      enrichDaily(c, dailyBars);
       c.rs = rsScore(c, spyRet);
+      c.eqD = equilibrium(c, dailyBars, 'day');
+      c.eqW = equilibrium(c, resampled, 'week');
       state.progress.done++;
       if (isCandidate) {
-        await new Promise(r => setTimeout(r, CHART_GAP_MS));
-        enrichWeekly(c, await fetchWeeklyHistory(c.symbol));
+        const { bars, ath, fetched } = await weeklyBarsFor(c, resampled);
+        if (fetched) await new Promise(r => setTimeout(r, CHART_GAP_MS));
+        enrichWeekly(c, bars, ath);
         state.progress.done++;
       }
     } catch {
@@ -401,6 +643,7 @@ async function scan() {
     }
     await new Promise(r => setTimeout(r, CHART_GAP_MS));
   }
+  persistWeeklyCache();
 
   // Strongest / Weakest Trending: whole-universe momentum extremes in
   // active trends (right side of the daily 12 EMA)
@@ -442,6 +685,13 @@ async function scan() {
     short: rank(shorts.map(c => buildRow(c, 'short', tf)).filter(Boolean)),
   });
 
+  // Equilibrium lists: deepest sustained squeeze (lowest avg pctile) first
+  const eqRank = (key) => infos
+    .map(c => c[key])
+    .filter(Boolean)
+    .sort((a, b) => a.avgPctile - b.avgPctile || a.bbWidth - b.bbWidth)
+    .slice(0, TOP_N);
+
   return {
     scannedAt: new Date().toISOString(),
     universe: {
@@ -453,6 +703,8 @@ async function scan() {
     },
     day: lists('day'),
     swing: lists('swing'),
+    eqDaily: eqRank('eqD'),
+    eqWeekly: eqRank('eqW'),
     momentum,
     weakest,
   };
@@ -475,7 +727,7 @@ async function runScan() {
     state.data = data;
     state.scannedAt = Date.now();
     try { fs.writeFileSync(DISK_CACHE, JSON.stringify({ scannedAt: state.scannedAt, data })); } catch {}
-    console.log(`Trending scan complete: day ${data.day.long.length}L/${data.day.short.length}S, swing ${data.swing.long.length}L/${data.swing.short.length}S, momentum ${data.momentum.length}/${data.weakest.length} (pools ${data.universe.longPool}/${data.universe.shortPool})`);
+    console.log(`Trending scan complete: day ${data.day.long.length}L/${data.day.short.length}S, swing ${data.swing.long.length}L/${data.swing.short.length}S, eq ${data.eqDaily.length}D/${data.eqWeekly.length}W, momentum ${data.momentum.length}/${data.weakest.length} (pools ${data.universe.longPool}/${data.universe.shortPool})`);
   } catch (err) {
     console.error('Trending scan failed:', err.message);
   } finally {

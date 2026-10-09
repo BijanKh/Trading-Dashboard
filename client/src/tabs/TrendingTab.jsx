@@ -4,11 +4,16 @@ import { fetchTrending } from '../lib/api';
 import QuoteTable from '../components/QuoteTable';
 import BacktestPanel from '../components/BacktestPanel';
 
-// Daily trend scan over S&P 500 + Nasdaq-100 (server/trending.js).
-// Two sections: Setups Daytrading (daily 12 EMA, within 5% of the all-time
-// high/low) and Setups Swingtrading (weekly 12 EMA, 10% band). Ranked by
+// "Setups" tab — daily scan over S&P 500 + Nasdaq-100 (server/trending.js).
+// Sections: Setups Daytrading (daily 12 EMA, within 5% of the all-time
+// high/low) and Setups Swingtrading (weekly 12 EMA, 10% band), ranked by
 // closeness to the 12 EMA (tightest pullbacks first); ΔEMA is that distance
 // in ATR units (|ΔEMA| <= 1 ATR = PULLBACK entry zone, > 2.5 = EXTENDED).
+// Setups Equilibriums Daily/Weekly: sideways-range screens — BB(20,2) width
+// today at/below the 10th percentile of the stock's own ~1y history, inside
+// the squeeze (≤ 15th) for ≥ 15 days / 8 weeks, plus a hard 20-bar high-low
+// range cap (12% daily / 25% weekly); ranked by avg percentile over the
+// persistence window (deepest sustained squeeze first).
 
 const COLS = (side) => [
   { key: 'symbol', label: 'SYM', type: 'text' },
@@ -46,6 +51,64 @@ function SetupTable({ title, side, rows }) {
     dec: 2,
   }));
   return <QuoteTable title={title} columns={COLS(side)} rows={tableRows} />;
+}
+
+const EQ_COLS = [
+  { key: 'symbol', label: 'SYM', type: 'text' },
+  { key: 'label', label: 'NAME', type: 'text' },
+  { key: 'price', label: 'LAST', type: 'price' },
+  { key: 'dayPct', label: 'DAY', type: 'pct' },
+  { key: 'avgPctile', label: 'AVG %ILE', type: 'price', dec: 1 },
+  { key: 'widthPctile', label: 'NOW %ILE', type: 'price', dec: 1 },
+  { key: 'sqzBars', label: 'SQZ', type: 'price', dec: 0 },
+  { key: 'bbWidth', label: 'BBW %', type: 'price', dec: 1 },
+  { key: 'rangePct', label: 'RANGE %', type: 'price', dec: 1 },
+  { key: 'rangePos', label: 'IN RANGE %', type: 'price', dec: 0 },
+  { key: 'rs', label: 'RS', type: 'price', dec: 1 },
+];
+
+function EquilibriumSection({ title, subtitle, rows }) {
+  const tableRows = (rows || []).map(r => ({
+    id: r.symbol,
+    chartSym: r.symbol,
+    symbol: r.symbol,
+    label: r.name,
+    price: r.price,
+    dayPct: r.dayPct,
+    widthPctile: r.widthPctile,
+    avgPctile: r.avgPctile,
+    sqzBars: r.sqzBars,
+    bbWidth: r.bbWidth != null ? r.bbWidth * 100 : null,
+    rangePct: r.rangePct != null ? r.rangePct * 100 : null,
+    rangePos: r.rangePos != null ? r.rangePos * 100 : null,
+    rs: r.rs,
+    spark: r.spark ?? null,
+    sparkTf: r.sparkTf ?? null,
+    dec: 2,
+  }));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ borderLeft: `3px solid ${colors.text.accent}`, paddingLeft: 12 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: colors.text.primary, fontFamily: fonts.sans, letterSpacing: 1.5 }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 11, color: colors.text.muted, fontFamily: fonts.mono, marginTop: 4 }}>
+          {subtitle}
+        </div>
+      </div>
+      {rows == null ? (
+        <div style={{ background: colors.bg.card, border: `1px solid ${colors.bg.border}`, borderRadius: 12, padding: 16, color: colors.text.muted, fontFamily: fonts.mono, fontSize: 12 }}>
+          Appears after the next scan (hit RESCAN)
+        </div>
+      ) : rows.length === 0 ? (
+        <div style={{ background: colors.bg.card, border: `1px solid ${colors.bg.border}`, borderRadius: 12, padding: 16, color: colors.text.muted, fontFamily: fonts.mono, fontSize: 12 }}>
+          No qualifiers today
+        </div>
+      ) : (
+        <QuoteTable title="TOP 10 TIGHTEST RANGES" columns={EQ_COLS} rows={tableRows} />
+      )}
+    </div>
+  );
 }
 
 const MOMENTUM_COLS = (side) => [
@@ -204,6 +267,17 @@ export default function TrendingTab() {
         lists={data.swing}
       />
 
+      <EquilibriumSection
+        title="SETUPS EQUILIBRIUMS DAILY"
+        subtitle="Bollinger(20,2) width ≤ 10th %ile of its own 1-year history · in squeeze (≤ 15th) ≥ 15 straight days · 20-day range ≤ 12% · ranked by deepest sustained squeeze"
+        rows={data.eqDaily}
+      />
+      <EquilibriumSection
+        title="SETUPS EQUILIBRIUMS WEEKLY"
+        subtitle="weekly Bollinger(20,2) width ≤ 10th %ile of its own ~1-year history · in squeeze (≤ 15th) ≥ 8 straight weeks · 20-week range ≤ 25% · ranked by deepest sustained squeeze"
+        rows={data.eqWeekly}
+      />
+
       <MomentumSection
         title="STRONGEST TRENDING"
         subtitle="whole universe ranked by momentum (RS: weighted 1M/3M/6M return vs SPY) · above the daily 12 EMA · no ATH condition"
@@ -230,6 +304,15 @@ export default function TrendingTab() {
         ≤ 2.5 → TRENDING, above → EXTENDED (chasing risk). RS = weighted 1/3/6-month excess return vs SPY
         in percentage points (context only, not the ranking). Shorts require price ≥ $5 and ≥ $20M avg
         daily dollar volume. Scan runs once per day after the US close.
+        Equilibriums: NOW %ILE = today's Bollinger(20,2) width as a percentile of the stock's own
+        ~1-year width history (≤ 10 required); the width must also have stayed inside the squeeze
+        (≤ 15th percentile) for ≥ 15 straight days (daily) / ≥ 8 straight weeks (weekly). AVG %ILE =
+        mean percentile over that window — the ranking: deepest sustained squeeze first. SQZ = how many
+        consecutive bars the squeeze has lasted (capped at 60). BBW % = width as % of price; RANGE % =
+        total high-low span of the last 20 bars (≤ 12% daily / ≤ 25% weekly — rejects tight flags inside
+        steep trends); IN RANGE % = where the live price sits inside that box (0 = low, 100 = high).
+        Both lists require price ≥ $5 and ≥ $20M avg daily dollar volume. Strict by design — fewer than
+        10 qualifiers is normal.
       </div>
     </div>
   );

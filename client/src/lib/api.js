@@ -125,3 +125,13 @@ export async function refreshData() {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+export async function fetchDan(symbol) {
+  const params = new URLSearchParams({ symbol: String(symbol || '').toUpperCase() });
+  const res = await fetch(`${BASE}/api/dan?${params}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}

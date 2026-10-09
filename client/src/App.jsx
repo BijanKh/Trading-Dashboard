@@ -13,6 +13,7 @@ import CryptoTab from './tabs/CryptoTab';
 import OptionsTab from './tabs/OptionsTab';
 import CreditTab from './tabs/CreditTab';
 import CalendarTab from './tabs/CalendarTab';
+import DanTab from './tabs/DanTab';
 
 const TABS = [
   { id: 'overview', label: 'Overview', component: OverviewTab, intraday: true },
@@ -23,7 +24,8 @@ const TABS = [
   { id: 'crypto', label: 'Crypto', component: CryptoTab, intraday: false },
   { id: 'options', label: 'Options', component: OptionsTab, intraday: false },
   { id: 'credit', label: 'Credit & Macro', component: CreditTab, intraday: false },
-  { id: 'trending', label: 'Trending', component: TrendingTab, intraday: false },
+  { id: 'trending', label: 'Setups', component: TrendingTab, intraday: false },
+  { id: 'dan', label: 'Dan', component: DanTab, intraday: false },
 ];
 
 function Header({ active }) {

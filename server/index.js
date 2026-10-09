@@ -29,6 +29,7 @@ import { getSpace } from './space.js';
 import { getSectorScreen, isSectorEtf } from './sectorscreen.js';
 import { getBacktest } from './backtest.js';
 import { evaluateAlerts } from './alerts.js';
+import { getDanRead } from './dan.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production';
@@ -346,6 +347,15 @@ app.get('/api/options-dash', async (req, res) => {
   } catch (err) {
     console.error('Error in /api/options-dash:', err.message);
     res.status(404).json({ error: err.message || 'Failed to load options data.' });
+  }
+});
+
+app.get('/api/dan', async (req, res) => {
+  try {
+    res.json(await getDanRead(req.query.symbol));
+  } catch (err) {
+    console.error('Error in /api/dan:', err.message);
+    res.status(404).json({ error: err.message || 'Failed to load chart data.' });
   }
 });
 
