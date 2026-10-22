@@ -30,6 +30,7 @@ import { getSectorScreen, isSectorEtf } from './sectorscreen.js';
 import { getBacktest } from './backtest.js';
 import { evaluateAlerts } from './alerts.js';
 import { getDanRead } from './dan.js';
+import { getIgnition, startIgnitionScheduler } from './ignition.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production';
@@ -402,6 +403,15 @@ app.get('/api/trending', async (req, res) => {
   }
 });
 
+app.get('/api/ignition', async (req, res) => {
+  try {
+    res.json(await getIgnition({ refresh: req.query.refresh === '1', asset: req.query.asset || null }));
+  } catch (err) {
+    console.error('Error in /api/ignition:', err);
+    res.status(502).json({ error: 'Failed to load ignition setups.' });
+  }
+});
+
 app.get('/api/calendar', async (req, res) => {
   try {
     res.json(await getCalendar());
@@ -450,4 +460,5 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT} (${isProduction ? 'production' : 'development'})`);
   startScheduler(fetchAndStore);
   startTrendingScheduler();
+  startIgnitionScheduler();
 });

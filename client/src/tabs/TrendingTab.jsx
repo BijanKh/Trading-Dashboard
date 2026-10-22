@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { colors, fonts } from '../styles/theme';
-import { fetchTrending } from '../lib/api';
+import { fetchTrending, fetchIgnition } from '../lib/api';
 import QuoteTable from '../components/QuoteTable';
 import BacktestPanel from '../components/BacktestPanel';
 
@@ -183,6 +183,128 @@ function Section({ title, subtitle, lists }) {
   );
 }
 
+
+// Setups Ignition — Bijan's "ideal trade" template (ZEC 18–21 Oct 2026, locked
+// 2026-10-22; spec in tradingcoach/optionsneutral/ideal_trade_zec_2026-10-20.md).
+// The scan runs as a Python child process (server/ignition.js) over two
+// universes and reports the STEP each name has reached:
+//   D exhaustion (lower low without follow-through) · E ignition (>= 2.5 ATR on
+//   >= 3x volume clearing the last lower high) · F equilibrium (falling highs +
+//   rising lows holding the 50 % retrace) · G triggered (close through the range
+//   high on >= 2x volume). Levels are what an alert needs, not an entry signal.
+const STEP_LABEL = { G: 'G ▲ TRIGGERED', F: 'F EQUILIBRIUM', E: 'E IGNITED', D: 'D EXHAUSTION', C: 'C PULLBACK' };
+const IGN_COLS = [
+  { key: 'symbol', label: 'SYM', type: 'text' },
+  { key: 'step', label: 'STEP', type: 'text' },
+  { key: 'price', label: 'LAST', type: 'price' },
+  { key: 'r126', label: '6M', type: 'pct' },
+  { key: 'dd', label: 'DD %', type: 'price', dec: 0 },
+  { key: 'fibDist', label: 'FIB Δ%', type: 'price', dec: 1 },
+  { key: 'low', label: 'LOW', type: 'price' },
+  { key: 'ignHigh', label: 'IGN HI', type: 'price' },
+  { key: 'volX', label: 'VOLx', type: 'price', dec: 1 },
+  { key: 'rangeLow', label: 'RNG LO', type: 'price' },
+  { key: 'rangeHigh', label: 'RNG HI', type: 'price' },
+  { key: 'fifty', label: '50 %', type: 'price' },
+  { key: 'retr', label: 'RETR', type: 'price', dec: 2 },
+  { key: 'dailyLh', label: 'DAILY LH', type: 'price' },
+  { key: 'note', label: 'NOTE', type: 'text', max: 220 },
+];
+
+function IgnitionTable({ title, scan, onRescan }) {
+  const status = scan?.status || 'idle';
+  const rows = (scan?.candidates || []).map(r => ({
+    id: r.symbol,
+    chartSym: r.symbol,
+    symbol: r.symbol,
+    step: STEP_LABEL[r.step] || r.step,
+    price: r.price,
+    r126: r.ret_126 != null ? r.ret_126 * 100 : null,
+    dd: r.drawdown != null ? r.drawdown * 100 : null,
+    fibDist: r.fib_dist != null ? r.fib_dist * 100 : null,
+    low: r.low ?? null,
+    ignHigh: r.ign_high ?? null,
+    volX: r.ign_vol_x ?? null,
+    rangeLow: r.range_low ?? null,
+    rangeHigh: r.range_high ?? null,
+    fifty: r.fifty_pct ?? null,
+    retr: r.wick_retrace ?? null,
+    dailyLh: r.daily_lh ?? null,
+    note: [r.note, r.step === 'G' && r.trig_bar ? `triggered ${String(r.trig_bar).slice(0, 16)}` : null,
+           r.step === 'G' && r.back_inside ? 'BACK INSIDE RANGE' : null].filter(Boolean).join(' · '),
+    dec: r.price >= 100 ? 2 : 4,
+  }));
+  const meta = [
+    scan?.scannedAt ? `scanned ${new Date(scan.scannedAt).toLocaleString()}` : 'not scanned yet',
+    scan?.passedDaily != null ? `${scan.passedDaily} of ${scan.scanned} past the daily gate` : null,
+    scan?.leaderCut != null && scan.leaderCut > -1 ? `leader cut ${Math.round(scan.leaderCut * 100)}% (6M)` : null,
+    status === 'running' ? `RUNNING ${scan.logTail?.slice(-1)[0] || ''}` : null,
+    status === 'error' ? `ERROR ${scan.error}` : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <div style={{ background: colors.bg.card, border: `1px solid ${colors.bg.border}`, borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: colors.text.secondary, fontFamily: fonts.sans }}>{title}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 11, color: status === 'error' ? colors.updown.down : colors.text.muted, fontFamily: fonts.mono }}>{meta}</span>
+          <button
+            onClick={onRescan}
+            disabled={status === 'running'}
+            style={{ background: colors.bg.cardHover, color: status === 'running' ? colors.text.muted : colors.text.accent, border: `1px solid ${colors.bg.border}`, borderRadius: 6, padding: '4px 10px', cursor: status === 'running' ? 'default' : 'pointer', fontFamily: fonts.mono, fontSize: 11 }}
+          >
+            {status === 'running' ? 'SCANNING...' : 'RESCAN'}
+          </button>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ color: colors.text.muted, fontFamily: fonts.mono, fontSize: 12 }}>
+          {status === 'running' ? 'Scanning...' : 'No names past step D right now'}
+        </div>
+      ) : (
+        <QuoteTable title={null} columns={IGN_COLS} rows={rows} />
+      )}
+    </div>
+  );
+}
+
+function IgnitionSection() {
+  const [ign, setIgn] = useState(null);
+  const [error, setError] = useState(null);
+  const load = useCallback(async (refresh = false, asset = null) => {
+    try { setError(null); setIgn(await fetchIgnition(refresh, asset)); }
+    catch (err) { setError(err.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const running = ign && (ign.crypto?.status === 'running' || ign.stock?.status === 'running');
+  useEffect(() => {
+    const t = setInterval(() => load(), running ? 10000 : 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [running, load]);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ borderLeft: `3px solid ${colors.text.accent}`, paddingLeft: 12 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: colors.text.primary, fontFamily: fonts.sans, letterSpacing: 1.5 }}>
+          SETUPS IGNITION — IDEAL TRADE
+        </div>
+        <div style={{ fontSize: 11, color: colors.text.muted, fontFamily: fonts.mono, marginTop: 4 }}>
+          leader (6M top decile, above 200d, recent high) · 25–50% off the high but ≤ 45% of the up-leg retraced (38.2 fib touch) · daily LH+LL, never oversold ·
+          then on 4h (crypto) / 1h (stocks): D lower low w/o follow-through → E ignition ≥ 2.5 ATR on ≥ 3× volume → F equilibrium holding the 50% → G trigger on ≥ 2× volume
+        </div>
+      </div>
+      {error && <div style={{ color: colors.updown.down, fontFamily: fonts.mono, fontSize: 12 }}>ignition scan unavailable: {error}</div>}
+      <IgnitionTable title="CRYPTO — COINGECKO TOP 100 (4H BARS)" scan={ign?.crypto} onRescan={() => load(true, 'crypto')} />
+      <IgnitionTable title="STOCKS — S&P 500 + NASDAQ-100 (1H BARS)" scan={ign?.stock} onRescan={() => load(true, 'stock')} />
+      <div style={{ fontSize: 11, color: colors.text.muted, fontFamily: fonts.mono, lineHeight: 1.6 }}>
+        STEP = how far along the template the name is; only G is a trigger, D–F are the watchlist. FIB Δ% = where the pullback low sits vs the
+        38.2% retracement of the whole up-leg (≈0 = the ZEC touch). LOW = the exhaustion low (the “that's the higher low or I'm wrong” level once
+        the range forms); IGN HI = ignition high; RNG LO/HI = the equilibrium; 50% = half-way of the ignition leg (held on closes in the template);
+        RETR = deepest wick retrace of the ignition leg (0.56 in the template); DAILY LH = the daily lower high a close must clear to confirm the
+        daily trend change. Crypto rescans every 4h, stocks every 2h in the US session; the daily gate is cached 20h.
+      </div>
+    </div>
+  );
+}
+
 export default function TrendingTab() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -255,6 +377,8 @@ export default function TrendingTab() {
           {scanning ? 'SCANNING...' : 'RESCAN'}
         </button>
       </div>
+
+      <IgnitionSection />
 
       <Section
         title="SETUPS DAYTRADING"

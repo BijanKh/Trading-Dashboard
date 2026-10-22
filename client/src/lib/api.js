@@ -135,3 +135,13 @@ export async function fetchDan(symbol) {
   }
   return res.json();
 }
+
+export async function fetchIgnition(refresh = false, asset = null) {
+  const params = new URLSearchParams();
+  if (refresh) params.set('refresh', '1');
+  if (asset) params.set('asset', asset);
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/ignition${qs ? '?' + qs : ''}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
