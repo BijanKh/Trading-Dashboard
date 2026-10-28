@@ -110,7 +110,7 @@ export default function OverviewTab() {
         <CorrelationMatrix correlations={quotes.correlations} />
         <div>
           <SectionLabel>SECTORS — TODAY</SectionLabel>
-          <SectorHeatmap quotes={g.sectors || []} mode="day" compact />
+          <SectorHeatmap quotes={(g.sectors || []).filter(q => !q.theme)} mode="day" compact />
         </div>
       </div>
 

@@ -148,7 +148,7 @@ function computeRRG() {
 
   const out = [];
   for (const e of GROUPS.sectors) {
-    if (e.s === 'SPY') continue;
+    if (e.s === 'SPY' || e.theme) continue;
     const ref = dailyRefs.bySymbol.get(e.s);
     if (!ref?.series?.length) continue;
 
@@ -422,6 +422,7 @@ async function fetchAllQuotes() {
         ytdPct: q ? q.ytdPct : null,
       };
       if (groupName === 'sectors') {
+        if (e.theme) out.theme = true;
         out.sma20 = q?.ref?.sma20 ?? null;
         out.sma50 = q?.ref?.sma50 ?? null;
         out.sma200 = q?.ref?.sma200 ?? null;
@@ -474,14 +475,14 @@ async function fetchAllQuotes() {
     return { id: r.id, label: r.label, num: r.num, den: r.den, group: r.group, dec: r.dec, value, dayPct, wtdPct, ytdPct };
   });
 
-  // Breadth: % of real sector ETFs (broad-market excluded) above each SMA,
+  // Breadth: % of real sector ETFs (broad-market + thematic excluded) above each SMA,
   // plus the symbols below it (the UI shows them on expand)
   const breadth = { pctAbove20: null, pctAbove50: null, pctAbove200: null, count: 0 };
   for (const window of [20, 50, 200]) {
     let above = 0, total = 0;
     const below = [];
     for (const q of groups.sectors) {
-      if (BREADTH_EXCLUDES.has(q.symbol)) continue;
+      if (BREADTH_EXCLUDES.has(q.symbol) || q.theme) continue;
       const s = q[`sma${window}`];
       if (q.price == null || s == null) continue;
       total++;
