@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { colors, fonts } from '../styles/theme';
 import { fetchTrending, fetchIgnition } from '../lib/api';
+import { fmtPrice } from '../lib/format';
 import QuoteTable from '../components/QuoteTable';
 import BacktestPanel from '../components/BacktestPanel';
 
@@ -192,6 +193,8 @@ function Section({ title, subtitle, lists }) {
 //   >= 3x volume clearing the last lower high) · F equilibrium (falling highs +
 //   rising lows holding the 50 % retrace) · G triggered (close through the range
 //   high on >= 2x volume). Levels are what an alert needs, not an entry signal.
+//   Stocks: E can fire on premarket bars (ign_session 'pre'); Yahoo has no
+//   extended-hours volume, so it shows VOL PENDING until the 09:30 bar confirms.
 const STEP_LABEL = { G: 'G ▲ TRIGGERED', F: 'F EQUILIBRIUM', E: 'E IGNITED', D: 'D EXHAUSTION', C: 'C PULLBACK' };
 const IGN_COLS = [
   { key: 'symbol', label: 'SYM', type: 'text' },
@@ -217,7 +220,7 @@ function IgnitionTable({ title, scan, onRescan }) {
     id: r.symbol,
     chartSym: r.symbol,
     symbol: r.symbol,
-    step: STEP_LABEL[r.step] || r.step,
+    step: (STEP_LABEL[r.step] || r.step) + (r.ign_session === 'pre' ? (r.ign_vol_pending ? ' · PRE (VOL PENDING)' : ' · PRE') : ''),
     price: r.price,
     r126: r.ret_126 != null ? r.ret_126 * 100 : null,
     dd: r.drawdown != null ? r.drawdown * 100 : null,
@@ -230,7 +233,10 @@ function IgnitionTable({ title, scan, onRescan }) {
     fifty: r.fifty_pct ?? null,
     retr: r.wick_retrace ?? null,
     dailyLh: r.daily_lh ?? null,
-    note: [r.note, r.step === 'G' && r.trig_bar ? `triggered ${String(r.trig_bar).slice(0, 16)}` : null,
+    note: [r.note,
+           r.ign_session === 'pre' && r.pre_high != null ? `premarket high ${fmtPrice(r.pre_high, r.price >= 100 ? 2 : 4)}` : null,
+           r.ign_session === 'pre' && r.ign_vol_pending && r.open_vol_x != null ? `open bar so far ${r.open_vol_x.toFixed(1)}× vol` : null,
+           r.step === 'G' && r.trig_bar ? `triggered ${String(r.trig_bar).slice(0, 16)}` : null,
            r.step === 'G' && r.back_inside ? 'BACK INSIDE RANGE' : null].filter(Boolean).join(' · '),
     dec: r.price >= 100 ? 2 : 4,
   }));
@@ -288,7 +294,8 @@ function IgnitionSection() {
         </div>
         <div style={{ fontSize: 11, color: colors.text.muted, fontFamily: fonts.mono, marginTop: 4 }}>
           leader (6M top decile, above 200d, recent high) · 25–50% off the high but ≤ 45% of the up-leg retraced (38.2 fib touch) · daily LH+LL, never oversold ·
-          then on 4h (crypto) / 1h (stocks): D lower low w/o follow-through → E ignition ≥ 2.5 ATR on ≥ 3× volume → F equilibrium holding the 50% → G trigger on ≥ 2× volume
+          then on 4h (crypto) / 1h (stocks): D lower low w/o follow-through → E ignition ≥ 2.5 ATR on ≥ 3× volume → F equilibrium holding the 50% → G trigger on ≥ 2× volume ·
+          stocks: E also fires on premarket bars (PRE), volume confirmed by the 09:30 bar
         </div>
       </div>
       {error && <div style={{ color: colors.updown.down, fontFamily: fonts.mono, fontSize: 12 }}>ignition scan unavailable: {error}</div>}
@@ -299,7 +306,10 @@ function IgnitionSection() {
         38.2% retracement of the whole up-leg (≈0 = the ZEC touch). LOW = the exhaustion low (the “that's the higher low or I'm wrong” level once
         the range forms); IGN HI = ignition high; RNG LO/HI = the equilibrium; 50% = half-way of the ignition leg (held on closes in the template);
         RETR = deepest wick retrace of the ignition leg (0.56 in the template); DAILY LH = the daily lower high a close must clear to confirm the
-        daily trend change. Crypto rescans every 4h, stocks every 2h in the US session; the daily gate is cached 20h.
+        daily trend change. PRE = the ignition fired in the premarket (high ≥ 2.5 ATR above the low, clearing the last lower high, low never
+        undercut); VOL PENDING = Yahoo carries no premarket volume, so the 09:30 opening bar must print ≥ 2.5× average volume to confirm —
+        a finished opening bar below that drops it. Crypto rescans every 4h, stocks 06:10–09:10 ET hourly in the premarket and every 2h in
+        the US session; the daily gate is cached 20h.
       </div>
     </div>
   );

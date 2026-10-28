@@ -6,7 +6,10 @@
 //
 // Two universes, scanned separately:
 //   crypto — CoinGecko top 100 by market cap, 4h bars (1h resampled), every 4h
-//   stock  — S&P 500 + Nasdaq-100, 1h bars, every 2h during the US session
+//   stock  — S&P 500 + Nasdaq-100, 1h bars, every 2h during the US session plus
+//            premarket passes (the scanner reads premarket bars for step E; Yahoo
+//            has no extended-hours volume, so a premarket ignition is "volume
+//            pending" until the 09:30 bar confirms it)
 // The scanner's daily gate (steps A–C) is cached on disk by the script itself
 // (--daily-cache, 20h TTL) so the intraday refreshes only refetch 1h bars for
 // the handful of names that passed the daily gate — the Yahoo load per refresh
@@ -135,7 +138,9 @@ export async function getIgnition({ refresh = false, asset = null } = {}) {
 export function startIgnitionScheduler() {
   // crypto trades around the clock: every 4h on the 4h-bar boundary (+10 min for the bar to close)
   cron.schedule('10 */4 * * *', () => { runScan('crypto'); }, { timezone: 'UTC' });
-  // stocks: every 2h through the US session plus one post-close pass
+  // stocks: premarket ignition passes (hourly premarket bars), then every 2h through the
+  // US session plus one post-close pass
+  cron.schedule('10 6,7,8,9 * * 1-5', () => { runScan('stock'); }, { timezone: 'America/New_York' });
   cron.schedule('40 9,11,13,15,16 * * 1-5', () => { runScan('stock'); }, { timezone: 'America/New_York' });
-  console.log('Ignition scheduler started: crypto every 4h (UTC), stocks 09:40/11:40/13:40/15:40/16:40 ET Mon-Fri');
+  console.log('Ignition scheduler started: crypto every 4h (UTC), stocks premarket 06:10/07:10/08:10/09:10 + 09:40/11:40/13:40/15:40/16:40 ET Mon-Fri');
 }
