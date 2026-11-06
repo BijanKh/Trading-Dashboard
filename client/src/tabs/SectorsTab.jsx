@@ -83,7 +83,7 @@ export default function SectorsTab() {
 
       <SectorHeatmap quotes={sectors} mode={mode} />
 
-      <RRGChart rrg={quotes.rrg} />
+      <RRGChart rrg={quotes.rrg} quotes={sectors} mode={mode} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16, alignItems: 'start' }}>
         <QuoteTable
